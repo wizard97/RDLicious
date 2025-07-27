@@ -1,0 +1,190 @@
+use std::str::FromStr;
+
+grammar;
+
+// Literals.
+match {
+    r"[0-9]+" => INT,
+    r"0x[0-9a-fA-F]+" => HEX_LOW,
+    r"0X[0-9a-fA-F]+" => HEX_UPPER,
+    r"[a-zA-Z][a-zA-Z0-9_]*" => ID,
+    "boolean",
+    "bit",
+    "longint",
+    "unsigned",
+    "string",
+    "accesstype",
+    "addressingtype",
+    "onreadtype",
+    "onwritetype",
+
+    "alias",
+    "external",
+    "internal",
+
+    "addrmap",
+    "regfile",
+    "reg",
+    "field",
+    "mem",
+    "signal",
+
+    "true",
+    "false",
+
+    "na",
+    "rw",
+    "wr",
+    "r",
+    "w",
+    "rw1",
+    "w1",
+    "rclr",
+    "rset",
+    "ruser",
+    "woset",
+    "woclr",
+    "wot",
+    "wzs",
+    "wzc",
+    "wzt",
+    "wclr",
+    "wset",
+    "wuser",
+    "compact",
+    "regalign",
+    "fullalign",
+    "hw",
+    "sw",
+
+    "posedge",
+    "negedge",
+    "bothedge",
+    "level",
+    "nonsticky",
+
+    "abstract",
+    "all",
+    "component",
+    "componentwidth",
+    "constraint",
+    "default",
+    "enum",
+    "encode",
+    "inside",
+    "number",
+    "property",
+    "ref",
+    "struct",
+    "this",
+    "type",
+
+    "alternate",
+    "byte",
+    "int",
+    "precedencetype",
+    "real",
+    "shortint",
+    "shortreal",
+    "signed",
+    "with",
+    "within",
+
+    "+",
+    "-",
+    "!",
+    "~",
+    "&&",
+    "~&",
+    "&",
+    "|",
+    "||",
+    "~|",
+    "^",
+    "~^",
+    "^~",
+    "<<",
+    ">>",
+    "*",
+    "**",
+    "/",
+    "%",
+    "==",
+    "=",
+    "!=",
+    "<=",
+    "<",
+    ">=",
+    ">",
+
+    "@",
+    "+=",
+    "%=",
+
+    "(",
+    ")",
+
+    // Skip whitespace and comments
+    r"\s*" => { },
+    r"//[^\n\r]*[\n\r]*" => { }, // `// comment`
+    r"/\*([^\*]*\*+[^\*/])*([^\*]*\*+|[^\*])*\*/" => { }, // `/* comment */`
+    _
+}
+
+pub ComponentTypePrimary : i32 = {
+    "addrmap" => 0,
+    "regfile" => 1,
+    "reg" => 2,
+    "field" => 3,
+    "mem" => 4,
+};
+
+
+ComponentBody : i32 = {
+  "{" "}" ";" => 0,
+};
+
+// ParameterizationDef : i32 = {
+//     "#" '('  => 0,
+// };
+
+pub Root : i32 = {
+    <c:ComponentNamedDef> => 0,
+    <r:Root> <c:ComponentNamedDef> => 0,
+};
+
+pub EnumEntry : i32 = {
+    ID "=" <e:Expr> ";" => 0,
+};
+
+EnumEntries : i32 = {
+    <e:EnumEntry> => 0,
+    <all:EnumEntries> <e:EnumEntry> => 0,
+};
+
+pub EnumDef : i32 = {
+    "enum" ID "{" <e:EnumEntries> "}" => 0,
+};
+
+pub ComponentNamedDef : i32 = {
+    <t:ComponentTypePrimary> ID <b:ComponentBody> => 0,
+};
+
+Number : i32 = {
+    INT => 0,
+    HEX_LOW => 0,
+    HEX_UPPER => 0,
+};
+
+
+Literal : i32 = {
+    Number => 0,
+};
+
+PrimaryExpr : i32 = {
+    Literal => 0,
+};
+
+Expr : i32 = {
+    <l:PrimaryExpr> => 0,
+};
