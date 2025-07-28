@@ -963,16 +963,16 @@ fn enum_entry_with_props() {
 
 #[test]
 fn local_prop_encode_and_modifier() {
-    // Encode/modifier forms not yet supported after revert
-    let src = r#"reg R { name = "X"; };"#;
-    grammar::RootParser::new().parse(src).unwrap();
+    let src = r#"reg R { default encode = MY_ENUM; posedge reset_prop; name = "X"; };"#;
+    let root = grammar::RootParser::new().parse(src).unwrap();
+    assert!(matches!(&root.0[0], ast::RootItem::Component(_)));
 }
 
 #[test]
 fn dynamic_encode_assignment() {
-    // Dynamic encode assignment not supported in reverted grammar; skip
-    let src = r#"reg R {}; R->name = 5;"#;
-    grammar::RootParser::new().parse(src).unwrap();
+    let src = r#"reg R {}; R->encode = MY_ENUM;"#;
+    let root = grammar::RootParser::new().parse(src).unwrap();
+    assert!(root.0.len() >= 2);
 }
 
 #[test]

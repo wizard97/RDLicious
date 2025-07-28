@@ -5,7 +5,7 @@ use crate::ast::*;
 // Lexer: a pragmatic subset of SystemRDL tokens needed for the implemented grammar.
 match {
     // Keywords and multi-char ops first so they are not lexed as generic ID
-    "addrmap","regfile","reg","field","mem","signal","enum","struct","abstract","default","external","internal","true","false","property","type","component","constraint","all","alias","bit","longint","boolean","number","inside","this",
+    "addrmap","regfile","reg","field","mem","signal","enum","struct","abstract","default","external","internal","true","false","property","type","component","constraint","all","alias","bit","longint","boolean","number","inside","this","posedge","negedge","bothedge","level","nonsticky",
     // Literal keywords (lowercase subset)
     "na","rw","wr","r","w","rw1","w1",
     "rclr","rset","ruser",
@@ -415,21 +415,32 @@ SimpleInstPost: () = {
 InstAddr: () = { ("@" Expr)? => () }; // retained for AnonComponentWithInst
 // removed simple PropertyAssign to avoid ambiguity; LocalPropAssign handles '=' case
 
+// Property assignments (basic + encode + modifiers)
 LocalPropAssign: LocalPropAssign = {
+    // default encode
+    "default" "encode" "=" <id:Ident> => LocalPropAssign { is_default: true, prop: "encode".into(), value: Some(Expr::Ident(id)), modifier: None },
+    // non-default encode
+    "encode" "=" <id:Ident> => LocalPropAssign { is_default: false, prop: "encode".into(), value: Some(Expr::Ident(id)), modifier: None },
+    // modifier forms
+    "default" <m:PropMod> <p:Ident> => LocalPropAssign { is_default: true, prop: p, value: None, modifier: Some(m) },
+    <m:PropMod> <p:Ident> => LocalPropAssign { is_default: false, prop: p, value: None, modifier: Some(m) },
+    // standard assignments (including default)
     "default" <p:Ident> "=" <e:Expr> => LocalPropAssign { is_default: true, prop: p, value: Some(e), modifier: None },
     <p:Ident> "=" <e:Expr> => LocalPropAssign { is_default: false, prop: p, value: Some(e), modifier: None },
-    // Allow property names that are special literal keywords
+    // selected keyword property names
     "sw" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "sw".into(), value: Some(e), modifier: None },
     "hw" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "hw".into(), value: Some(e), modifier: None },
     "name" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "name".into(), value: Some(e), modifier: None },
     "desc" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "desc".into(), value: Some(e), modifier: None },
     "reset" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "reset".into(), value: Some(e), modifier: None },
 };
+PropMod: String = { "posedge" => "posedge".into(), "negedge" => "negedge".into(), "bothedge" => "bothedge".into(), "level" => "level".into(), "nonsticky" => "nonsticky".into() };
 DynPropAssign: DynPropAssign = {
     <t:InstanceRef> "->" <p:Ident> "=" <e:Expr> => DynPropAssign { target: t, prop: p, value: Some(e) },
     <t:InstanceRef> "->" "reset" "=" <e:Expr> => DynPropAssign { target: t, prop: "reset".into(), value: Some(e) },
     <t:InstanceRef> "->" "name" "=" <e:Expr> => DynPropAssign { target: t, prop: "name".into(), value: Some(e) },
     <t:InstanceRef> "->" "desc" "=" <e:Expr> => DynPropAssign { target: t, prop: "desc".into(), value: Some(e) },
+    <t:InstanceRef> "->" "encode" "=" <id:Ident> => DynPropAssign { target: t, prop: "encode".into(), value: Some(Expr::Ident(id)) },
 };
 InstanceRef: Vec<InstanceRefElem> = {
     <h:InstanceRefElem> <ts:InstanceRefTail*> => { let mut v=vec![h]; v.extend(ts); v },
