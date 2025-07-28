@@ -1,71 +1,17 @@
-// NOTE: This is a partial translation of the SystemRDL.g4 grammar to LALRPOP.
-// It focuses on the high-level structure needed by the current tests:
-//  - Root containing a list of component or enum definitions terminated by ';'
-//  - Component named definitions with an (empty) body
-//  - Enum definitions with entries
-//  - A very small expression grammar (currently just numeric literals or IDs)
-// The intent is to extend this incrementally to cover more of SystemRDL.
-
 grammar;
 
 use crate::ast::*;
 
-// ---------------------------- LEXER ---------------------------------------
+// Lexer: a pragmatic subset of SystemRDL tokens needed for the implemented grammar.
 match {
-    // Numbers (decimal & hex)
     r"[0-9]+" => INT,
     r"0x[0-9a-fA-F]+" => HEX_LOW,
     r"0X[0-9a-fA-F]+" => HEX_UPPER,
-
-    // Identifiers
     r"[a-zA-Z_][a-zA-Z0-9_]*" => ID,
-
-    // Keywords we currently distinguish explicitly
-    "addrmap",
-    "regfile",
-    "reg",
-    "field",
-    "mem",
-    "enum",
-
-    // Operators & punctuation used so far
-    "**",
-    "<<",
-    ">>",
-    "==",
-    "!=",
-    "<=",
-    ">=",
-    "&&",
-    "||",
-    "=",
-    "[",
-    "]",
-    "@",
-    "{",
-    "}",
-    ";",
-    ",",
-    "(",
-    ")",
-    "?",
-    ":",
-    "+",
-    "-",
-    "*",
-    "/",
-    "%",
-    "&",
-    "|",
-    "^",
-    "~^",
-    "^~",
-    "!",
-    "~",
-    "<",
-    ">",
-
-    // Whitespace & comments
+    "addrmap","regfile","reg","field","mem","enum","struct","abstract","default","external","internal","true","false","property","type","component","constraint","all","signal","alias",
+    "**","<<",">>","==","!=","<=",">=","&&","||","~&","~|",
+    "=","+=","%=","[","]","@","->","::","{","}",";",",",".","'","#",
+    "(",")","?",":","+","-","*","/","%","&","|","^","~^","^~","!","~","<",">",
     r"[ \t\r\n]+" => { },
     r"//[^\n\r]*" => { },
     r"/\*([^*]*\*+[^*/])*([^*]*\*+|[^*])*\*/" => { },
@@ -73,123 +19,147 @@ match {
     _
 }
 
-// ---------------------------- AST TYPES -----------------------------------
-
-// AST definitions live in ast.rs. Here we just build them.
-
-// ---------------------------- PARSER RULES --------------------------------
-
 Ident: String = {
     <s:ID> => s.to_string(),
 };
-
 Number: String = {
     <s:INT> => s.to_string(),
     <s:HEX_LOW> => s.to_string(),
     <s:HEX_UPPER> => s.to_string(),
 };
-
-String: String = { <s:STRING> => s.to_string() };
-
-pub Expr: Expr = Ternary;
-
-Ternary: Expr = {
-    <c:LogicOr> "?" <t:Expr> ":" <e:Expr> => Expr::Ternary { cond: Box::new(c), then_br: Box::new(t), else_br: Box::new(e) },
-    LogicOr => <>,
+String: String = {
+    <s:STRING> => s.to_string(),
 };
 
-LogicOr: Expr = {
-    <l:LogicOr> "||" <r:LogicAnd> => Expr::Binary { op: "||".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    LogicAnd => <>,
-};
-
-LogicAnd: Expr = {
-    <l:LogicAnd> "&&" <r:BitOr> => Expr::Binary { op: "&&".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    BitOr => <>,
-};
-
-BitOr: Expr = {
-    <l:BitOr> "|" <r:BitXor> => Expr::Binary { op: "|".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    BitXor => <>,
-};
-
-BitXor: Expr = {
-    <l:BitXor> "^" <r:BitAnd> => Expr::Binary { op: "^".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    <l:BitXor> "~^" <r:BitAnd> => Expr::Binary { op: "~^".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    <l:BitXor> "^~" <r:BitAnd> => Expr::Binary { op: "^~".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    BitAnd => <>,
-};
-
-BitAnd: Expr = {
-    <l:BitAnd> "&" <r:Equality> => Expr::Binary { op: "&".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    Equality => <>,
-};
-
-Equality: Expr = {
-    <l:Equality> "==" <r:Relational> => Expr::Binary { op: "==".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    <l:Equality> "!=" <r:Relational> => Expr::Binary { op: "!=".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    Relational => <>,
-};
-
-Relational: Expr = {
-    <l:Relational> "<" <r:Shift> => Expr::Binary { op: "<".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    <l:Relational> "<=" <r:Shift> => Expr::Binary { op: "<=".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    <l:Relational> ">" <r:Shift> => Expr::Binary { op: ">".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    <l:Relational> ">=" <r:Shift> => Expr::Binary { op: ">=".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    Shift => <>,
-};
-
-Shift: Expr = {
-    <l:Shift> "<<" <r:Add> => Expr::Binary { op: "<<".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    <l:Shift> ">>" <r:Add> => Expr::Binary { op: ">>".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    Add => <>,
-};
-
-Add: Expr = {
-    <l:Add> "+" <r:Mul> => Expr::Binary { op: "+".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    <l:Add> "-" <r:Mul> => Expr::Binary { op: "-".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    Mul => <>,
-};
-
-Mul: Expr = {
-    <l:Mul> "*" <r:Unary> => Expr::Binary { op: "*".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    <l:Mul> "/" <r:Unary> => Expr::Binary { op: "/".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    <l:Mul> "%" <r:Unary> => Expr::Binary { op: "%".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    Unary => <>,
-};
-
-Unary: Expr = {
-    "+" <u:Unary> => Expr::Unary { op: "+".into(), rhs: Box::new(u) },
-    "-" <u:Unary> => Expr::Unary { op: "-".into(), rhs: Box::new(u) },
-    "!" <u:Unary> => Expr::Unary { op: "!".into(), rhs: Box::new(u) },
-    "~" <u:Unary> => Expr::Unary { op: "~".into(), rhs: Box::new(u) },
-    Primary => <>,
+// Expression grammar using precedence / associativity attributes.
+// Lower numeric level = higher precedence (level 0 binds tightest).
+pub Expr: Expr = {
+    // Primary atoms
+    #[precedence(level="0")] Primary,
+    // Unary prefix operators (right-associative to chain like ~!-a)
+    #[precedence(level="0")]
+    "+" <e:Expr> => Expr::Unary { op: "+".into(), rhs: Box::new(e) },
+    #[precedence(level="0")]
+    "-" <e:Expr> => Expr::Unary { op: "-".into(), rhs: Box::new(e) },
+    #[precedence(level="0")]
+    "!" <e:Expr> => Expr::Unary { op: "!".into(), rhs: Box::new(e) },
+    #[precedence(level="0")]
+    "~" <e:Expr> => Expr::Unary { op: "~".into(), rhs: Box::new(e) },
+    // Exponentiation (right associative)
+    #[precedence(level="1")] #[assoc(side="right")]
+    <l:Expr> "**" <r:Expr> => Expr::Binary { op: "**".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Multiplicative
+    #[precedence(level="2")] #[assoc(side="left")]
+    <l:Expr> "*" <r:Expr> => Expr::Binary { op: "*".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="2")] #[assoc(side="left")]
+    <l:Expr> "/" <r:Expr> => Expr::Binary { op: "/".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="2")] #[assoc(side="left")]
+    <l:Expr> "%" <r:Expr> => Expr::Binary { op: "%".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Additive
+    #[precedence(level="3")] #[assoc(side="left")]
+    <l:Expr> "+" <r:Expr> => Expr::Binary { op: "+".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="3")] #[assoc(side="left")]
+    <l:Expr> "-" <r:Expr> => Expr::Binary { op: "-".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Shifts
+    #[precedence(level="4")] #[assoc(side="left")]
+    <l:Expr> "<<" <r:Expr> => Expr::Binary { op: "<<".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="4")] #[assoc(side="left")]
+    <l:Expr> ">>" <r:Expr> => Expr::Binary { op: ">>".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Relational
+    #[precedence(level="5")] #[assoc(side="left")]
+    <l:Expr> "<" <r:Expr> => Expr::Binary { op: "<".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="5")] #[assoc(side="left")]
+    <l:Expr> "<=" <r:Expr> => Expr::Binary { op: "<=".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="5")] #[assoc(side="left")]
+    <l:Expr> ">" <r:Expr> => Expr::Binary { op: ">".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="5")] #[assoc(side="left")]
+    <l:Expr> ">=" <r:Expr> => Expr::Binary { op: ">=".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Equality
+    #[precedence(level="6")] #[assoc(side="left")]
+    <l:Expr> "==" <r:Expr> => Expr::Binary { op: "==".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="6")] #[assoc(side="left")]
+    <l:Expr> "!=" <r:Expr> => Expr::Binary { op: "!".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Bitwise AND
+    #[precedence(level="7")] #[assoc(side="left")]
+    <l:Expr> "&" <r:Expr> => Expr::Binary { op: "&".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Bitwise XOR (three spellings)
+    #[precedence(level="8")] #[assoc(side="left")]
+    <l:Expr> "^" <r:Expr> => Expr::Binary { op: "^".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="8")] #[assoc(side="left")]
+    <l:Expr> "~^" <r:Expr> => Expr::Binary { op: "~^".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="8")] #[assoc(side="left")]
+    <l:Expr> "^~" <r:Expr> => Expr::Binary { op: "^~".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Bitwise OR
+    #[precedence(level="9")] #[assoc(side="left")]
+    <l:Expr> "|" <r:Expr> => Expr::Binary { op: "|".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Logical AND
+    #[precedence(level="10")] #[assoc(side="left")]
+    <l:Expr> "&&" <r:Expr> => Expr::Binary { op: "&&".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Logical OR
+    #[precedence(level="11")] #[assoc(side="left")]
+    <l:Expr> "||" <r:Expr> => Expr::Binary { op: "||".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    // Ternary conditional (right associative, lowest precedence)
+    #[precedence(level="12")] #[assoc(side="right")]
+    <c:Expr> "?" <t:Expr> ":" <e:Expr> => Expr::Ternary { cond: Box::new(c), then_br: Box::new(t), else_br: Box::new(e) },
 };
 
 Primary: Expr = {
+    EnumLit,
+    StructLit,
+    ArrayLit,
+    BoolLit,
     Number => Expr::Number(<>),
-    Ident  => Expr::Ident(<>),
     String => Expr::Str(<>),
+    Ident  => Expr::Ident(<>),
     "(" <e:Expr> ")" => e,
 };
 
+EnumLit: Expr = {
+    <s:Ident> "::" <n:Ident> => Expr::EnumLiteral { scope: s, name: n },
+};
+BoolLit: Expr = {
+    "true" => Expr::Bool(true),
+    "false" => Expr::Bool(false),
+};
+ArrayLit: Expr = {
+    "'" "{" <elems:ArrayElems?> "}" => Expr::ArrayLiteral(elems.unwrap_or_default()),
+};
+ArrayElems: Vec<Expr> = {
+    <h:Expr> "," <t:ArrayElems> => { let mut v=vec![h]; v.extend(t); v },
+    <e:Expr> => vec![e],
+};
+StructLit: Expr = {
+    <n:Ident> "'" "{" <kvs:StructKVs?> "}" => Expr::StructLiteral { name: n, kv: kvs.unwrap_or_default() },
+};
+StructKVs: Vec<(String, Expr)> = {
+    <h:StructKV> "," <t:StructKVs> => { let mut v=vec![h]; v.extend(t); v },
+    <one:StructKV> => vec![one],
+};
+StructKV: (String, Expr) = {
+    <k:Ident> ":" <v:Expr> => (k, v),
+};
+
+// ---------------- Root and top-level items ---------------------------------
 pub Root: Root = {
     <v:RootItems> => Root(v),
     => Root(vec![]),
 };
-
 RootItems: Vec<RootItem> = {
-    <head:RootItem> ";" <tail:RootItems> => {
-        let mut v = vec![head];
-        v.extend(tail);
-        v
-    },
-    <single:RootItem> ";" => vec![single],
+    <h:RootItem> ";" <t:RootItems> => { let mut v=vec![h]; v.extend(t); v },
+    <s:RootItem> ";" => vec![s],
 };
-
 RootItem: RootItem = {
     ComponentNamedDef => RootItem::Component(<>),
     EnumDef => RootItem::Enum(<>),
+    StructDef => RootItem::Struct(<>),
+    DynPropAssign => RootItem::DynPropAssign(<>),
+    LocalPropAssign => RootItem::LocalPropAssign(<>),
+    UDPDef => RootItem::Udp(<>),
+    TopLevelInst => <>,
+};
+
+TopLevelInst: RootItem = {
+    SimpleInst => RootItem::LocalPropAssign(LocalPropAssign { is_default:false, prop:"_inst".into(), value: None }),
 };
 
 ComponentTypePrimary: ComponentTypePrimary = {
@@ -203,51 +173,172 @@ ComponentTypePrimary: ComponentTypePrimary = {
 ComponentBody: () = {
     "{" (ComponentBodyItem ";")* "}" => (),
 };
-
 ComponentBodyItem: () = {
     AnonComponentWithInst => (),
     ComponentNamedDef => (),
     SimpleInst => (),
-    PropertyAssign => (),
+    LocalPropAssign => (),
+    DynPropAssign => (),
+    ParamInst => (),
 };
-
-AnonComponentWithInst: () = { // e.g., reg { ... } reg_foo
-    ComponentTypePrimary ComponentBody Ident InstSuffixes? InstAddr? => (),
+AnonComponentWithInst: () = {
+    ComponentTypePrimary ComponentBody Ident InstSuffixes? InstAddr => (),
 };
-
-SimpleInst: () = { // e.g., mem_mem mem_inst;
-    ExtKw? Ident Ident InstSuffixes? InstAddr? => (),
+// Allow optional parameter instantiation between type name and instance identifier
+// Need lookahead between type and instance name; treat pattern with '#' as separate rule
+SimpleInst: () = {
+    ExtKw? Ident Ident InstSuffixes? InstAddr => (),
+    ExtKw? Ident ParamInst Ident InstSuffixes? InstAddr => (),
 };
-
-ExtKw: () = { "external" => () };
+ExtKw: () = {
+    "external" => (),
+};
 
 InstSuffixes: () = { RangeSuffixes => () };
-RangeSuffixes: () = { RangeSuffix RangeSuffixes => (), RangeSuffix => (), ArraySuffix RangeSuffixes => (), ArraySuffix => () };
-RangeSuffix: () = { "[" Expr ":" Expr "]" => () };
-ArraySuffix: () = { "[" Expr "]" => () };
-InstAddr: () = { "@" Expr => () };
+RangeSuffixes: () = {
+    RangeSuffix RangeSuffixes => (),
+    RangeSuffix => (),
+    ArraySuffix RangeSuffixes => (),
+    ArraySuffix => (),
+};
+RangeSuffix: () = {
+    "[" Expr ":" Expr "]" => (),
+};
+ArraySuffix: () = {
+    "[" Expr "]" => (),
+};
+InstAddr: () = {
+    ("@" Expr)? ("+=" Expr)? ("%=" Expr)? => (),
+};
+// removed simple PropertyAssign to avoid ambiguity; LocalPropAssign handles '=' case
 
-PropertyAssign: () = {
-    Ident "=" Expr => (),
+LocalPropAssign: LocalPropAssign = {
+    "default" <p:Ident> "=" <e:Expr> => LocalPropAssign { is_default: true, prop: p, value: Some(e) },
+    <p:Ident> "=" <e:Expr> => LocalPropAssign { is_default: false, prop: p, value: Some(e) },
+};
+DynPropAssign: DynPropAssign = {
+    <t:InstanceRef> "->" <p:Ident> "=" <e:Expr> => DynPropAssign { target: t, prop: p, value: Some(e) },
+};
+InstanceRef: Vec<InstanceRefElem> = {
+    <h:InstanceRefElem> <ts:InstanceRefTail*> => { let mut v=vec![h]; v.extend(ts); v },
+};
+InstanceRefTail: InstanceRefElem = {
+    "." <e:InstanceRefElem> => e,
+};
+InstanceRefElem: InstanceRefElem = {
+    <id:Ident> <s:ArraySuffixesIROpt> => InstanceRefElem { ident: id, array_suffixes: s },
+};
+ArraySuffixesIROpt: Vec<Option<Expr>> = {
+    <v:ArraySuffixesIR> => v,
+    => vec![],
+};
+ArraySuffixesIR: Vec<Option<Expr>> = {
+    <h:ArraySuffixIR> <t:ArraySuffixesIR> => { let mut v=vec![h]; v.extend(t); v },
+    <o:ArraySuffixIR> => vec![o],
+};
+ArraySuffixIR: Option<Expr> = {
+    "[" <e:Expr> "]" => Some(e),
+    "[" "]" => None,
 };
 
 pub ComponentNamedDef: ComponentDef = {
-    <t:ComponentTypePrimary> <n:Ident> <_b:ComponentBody> => ComponentDef { ctype: t, name: n },
+    <t:ComponentTypePrimary> <n:Ident> <params:ParamDefOpt> <_b:ComponentBody> => ComponentDef { ctype: t, name: n, params },
+};
+
+// ---------------- Struct definitions (subset) -----------------------------
+pub StructDef: StructDef = {
+    <h:StructHeader> "{" <elems:StructElems?> "}" => StructDef { name: h.0, base: h.1, elems: elems.unwrap_or_default() },
+};
+StructHeader: (String, Option<String>) = {
+    "struct" <n:Ident> ":" <b:Ident> => (n, Some(b)),
+    "struct" <n:Ident> => (n, None),
+    "abstract" "struct" <n:Ident> ":" <b:Ident> => (n, Some(b)),
+    "abstract" "struct" <n:Ident> => (n, None),
+};
+StructElems: Vec<StructElem> = {
+    <h:StructElem> <t:StructElems> => { let mut v=vec![h]; v.extend(t); v },
+    <e:StructElem> => vec![e],
+};
+StructElem: StructElem = {
+    <ty:Ident> <name:Ident> <arr:StructElemArray?> ";" => StructElem { ty, name, is_array: arr.is_some() },
+};
+StructElemArray: () = { "[" "]" => () };
+
+// ---------------- User-defined properties (subset) -------------------------
+UDPDef: UDPDef = {
+    "property" <n:Ident> "{" <attrs:UDPAttrList> "}" => UDPDef { name: n, attrs },
+};
+UDPAttrList: Vec<UDPAttr> = {
+    <h:UDPAttr> ";" <t:UDPAttrList> => { let mut v=vec![h]; v.extend(t); v },
+    <a:UDPAttr> ";" => vec![a],
+};
+UDPAttr: UDPAttr = {
+    "type" "=" <dt:Ident> <arr:UDPArray?> => UDPAttr::Type { data_type: dt, is_array: arr.is_some() },
+    "default" "=" <e:Expr> => UDPAttr::Default(e),
+    "component" "=" <ts:PropertyCompTypes> => UDPAttr::Usage(ts),
+    "constraint" "=" <c:Ident> => UDPAttr::Constraint(c),
+};
+UDPArray: () = {
+    "[" "]" => (),
+};
+PropertyCompTypes: Vec<String> = {
+    <h:PropertyCompType> "|" <t:PropertyCompTypes> => { let mut v=vec![h]; v.extend(t); v },
+    <one:PropertyCompType> => vec![one],
+};
+PropertyCompType: String = {
+    "reg" => "reg".into(),
+    "addrmap" => "addrmap".into(),
+    "regfile" => "regfile".into(),
+    "field" => "field".into(),
+    "mem" => "mem".into(),
+    "signal" => "signal".into(),
+    "all" => "all".into(),
+    "constraint" => "constraint".into(),
+    <s:Ident> => s,
+};
+
+// ---------------- Parameters (subset) --------------------------------------
+ParamDefOpt: Vec<ParamDecl> = {
+    <p:ParamDef> => p,
+    => vec![],
+};
+ParamDef: Vec<ParamDecl> = {
+    "#" "(" <es:ParamDefElems> ")" => es,
+};
+ParamDefElems: Vec<ParamDecl> = {
+    <h:ParamDefElem> "," <t:ParamDefElems> => { let mut v=vec![h]; v.extend(t); v },
+    <e:ParamDefElem> => vec![e],
+};
+ParamDefElem: ParamDecl = {
+    <dt:Ident> <name:Ident> ParamArrayType? <def:ParamDefault?> => ParamDecl { data_type: dt, name, default: def },
+};
+ParamArrayType: () = {
+    "[" "]" => (),
+};
+ParamDefault: Expr = {
+    "=" <e:Expr> => e,
+};
+
+// No longer need optional wrapper; handled in SimpleInst alternatives
+ParamInst: () = {
+    "#" "(" <ParamAssignments> ")" => (),
+};
+ParamAssignments: () = {
+    <ParamAssignment> "," <ParamAssignments> => (),
+    <ParamAssignment> => (),
+};
+ParamAssignment: () = {
+    "." Ident "(" Expr ")" => (),
 };
 
 EnumEntries: Vec<EnumEntry> = {
-    <head:EnumEntry> <tail:EnumEntries> => {
-        let mut v = vec![head];
-        v.extend(tail); v
-    },
-    <last:EnumEntry> => vec![last],
+    <h:EnumEntry> <t:EnumEntries> => { let mut v=vec![h]; v.extend(t); v },
+    <l:EnumEntry> => vec![l],
 };
-
 EnumEntry: EnumEntry = {
     <n:Ident> "=" <e:Expr> ";" => EnumEntry { name: n, value: Some(e) },
     <n:Ident> ";" => EnumEntry { name: n, value: None },
 };
-
 pub EnumDef: EnumDef = {
     "enum" <n:Ident> "{" <ents:EnumEntries> "}" => EnumDef { name: n, entries: ents },
 };

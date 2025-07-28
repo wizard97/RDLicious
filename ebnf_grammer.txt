@@ -1,0 +1,243 @@
+Grammar
+The formal syntax of SystemRDL is described using Backus-Naur Form (BNF). The syntax of SystemRDL
+source is derived from the starting symbol root. If there is a conflict between a grammar element shown
+anywhere in this Standard and the material in this annex, the material shown in this annex shall take
+precedence.
+The full syntax and semantics of SystemRDL are not described solely using BNF. The normative text
+description contained within the clauses and annexes of this standard provide additional details on the syntax
+and semantics described in this BNF.
+B.1 SystemRDL source text
+root ::= { description }
+description ::=
+ component_def
+ | enum_def
+ | property_definition
+ | struct_def
+ | constraint_def
+ | explicit_component_inst
+ | property_assignment
+B.2 User-defined properties
+property_definition ::= property id { property_body } ;
+property_body ::= property_attribute { property_attribute }
+property_attribute ::=
+ property_type
+ | property_usage
+ | property_default
+ | property_constraint
+property_type ::= type = property_data_type [ array_type ] ;
+property_data_type ::=
+ component_primary_type
+ | ref
+ | number
+ | basic_data_type
+property_usage ::= component = property_comp_types ;
+property_comp_types ::= property_comp_type { | property_comp_type }
+property_comp_type ::=
+ component_type
+ | constraint
+ | all
+property_default ::= default = constant_expression ;
+property_constraint::= constraint = property_constraint_type ;
+property_constraint_type::= componentwidth
+108 Copyright © 2015 - 2018 Accellera.
+All rights reserved.
+January 2018 SystemRDL 2.0
+B.3 Component definition
+component_def ::=
+ component_named_def component_inst_type component_insts ;
+ | component_anon_def component_inst_type component_insts ;
+ | component_named_def [ component_insts ] ;
+ | component_anon_def component_insts ;
+ | component_inst_type component_named_def component_insts ;
+ | component_inst_type component_anon_def component_insts ;
+component_named_def::= component_type id [ param_def ] component_body
+component_anon_def::= component_type component_body
+component_body ::= { { component_body_elem } }
+component_body_elem ::=
+ component_def
+ | enum_def
+ | struct_def
+ | constraint_def
+ | explicit_component_inst
+ | property_assignment
+component_type ::=
+ component_primary_type
+ | signal
+component_primary_type ::= addrmap | regfile | reg | field | mem
+explicit_component_inst ::= [ component_inst_type ] [ component_inst_alias ]
+id component_insts ;
+component_insts ::= [ param_inst ] component_inst { , component_inst }
+component_inst ::=
+ id [ component_inst_array_or_range ]
+ [ = constant_expression ]
+ [ @ constant_expression ]
+ [ += constant_expression ]
+ [ %= constant_expression ]
+component_inst_alias ::= alias id
+component_inst_type ::= external | internal
+component_inst_array_or_range ::=
+ array { array }
+ | range
+B.4 Struct definitions
+struct_def ::= [ abstract ] struct id [ : id ] struct_body ;
+struct_body ::= { { struct_elem } }
+struct_elem ::= struct_type id [ array_type ] ;
+struct_type ::=
+ data_type
+ | component_type
+B.5 Constraints
+constraint_def ::=
+ constraint constraint_def_exp ;
+ | constraint constraint_def_anon ;
+constraint_def_exp ::= id constraint_body [ constraint_insts ]
+Copyright © 2015 - 2018 Accellera. 109
+All rights reserved.
+Specification January 2018
+constraint_def_anon ::= constraint_body constraint_insts
+constraint_insts ::= id { , id }
+constraint_body ::= { { constraint_elem ; } }
+constraint_prop_assignment ::= id = constant_expression
+constraint_elem ::=
+ constant_expression
+ | constraint_prop_assignment
+ | constraint_lhs inside { constraint_values }
+ | constraint_lhs inside id
+constraint_values ::= constraint_value { , constraint_value }
+constraint_value ::=
+ constant_expression
+ | [ constant_expression : constant_expression ]
+constraint_lhs ::=
+ this
+ | instance_ref
+B.6 Parameters
+param_def ::= # ( param_def_elem { , param_def_elem } )
+param_def_elem ::= data_type id [ array_type ] [ = constant_expression ]
+param_inst ::= # ( param_elem { , param_elem } )
+param_elem ::= . id ( param_value )
+param_value ::= constant_expression
+B.7 Enums
+enum_def ::= enum id enum_body ;
+enum_body ::= { enum_entry { enum_entry } }
+enum_entry ::= id [ = constant_expression ] [ enum_property_assignment ] ;
+enum_property_assignment ::= { { explicit_prop_assignment ; } }
+B.8 Property assignment
+property_assignment ::=
+ explicit_or_default_prop_assignment
+ | post_prop_assignment
+explicit_or_default_prop_assignment ::=
+ [ default ] explicit_prop_modifier ;
+ | [ default ] explicit_prop_assignment ;
+explicit_prop_modifier ::= prop_mod id
+explicit_encode_assignment ::= encode = id
+explicit_prop_assignment ::=
+ prop_assignment_lhs [ = prop_assignment_rhs ]
+ | explicit_encode_assignment
+post_encode_assignment ::= instance_ref -> encode = id
+post_prop_assignment ::=
+ prop_ref [ = prop_assignment_rhs ] ;
+ | post_encode_assignment ;
+prop_mod ::= posedge | negedge | bothedge | level | nonsticky
+110 Copyright © 2015 - 2018 Accellera.
+All rights reserved.
+January 2018 SystemRDL 2.0
+prop_assignment_lhs ::=
+ prop_keyword
+ | id
+prop_keyword ::= sw | hw | rclr | rset | woclr | woset
+prop_assignment_rhs ::=
+ constant_expression
+ | precedencetype_literal
+B.9 Struct literal
+struct_literal ::= id '{ struct_literal_body }
+struct_literal_body ::= [ struct_literal_elem { , struct_literal_elem } ]
+struct_literal_elem ::= id : constant_expression
+B.10 Array literal
+array_literal ::= '{ array_literal_body }
+array_literal_body ::= constant_expression { , constant_expression }
+B.11 Reference
+instance_ref ::= instance_ref_element { . instance_ref_element }
+prop_ref ::=
+ instance_ref -> prop_keyword
+ | instance_ref -> id
+instance_or_prop_ref ::=
+ instance_ref -> prop_keyword
+ | instance_ref -> id
+ | instance_ref
+instance_ref_element ::= id { array }
+B.12 Array and range
+range ::= [ constant_expression : constant_expression ]
+array ::= [ constant_expression ]
+array_type ::= [ ]
+B.13 Concatenation
+constant_concatenation ::= { constant_expression { , constant_expression } }
+constant_multiple_concatenation ::=
+{ constant_expression constant_concatenation }
+B.14 Data types
+integer_type ::=
+ integer_vector_type
+ | integer_atom_type
+Copyright © 2015 - 2018 Accellera. 111
+All rights reserved.
+Specification January 2018
+integer_atom_type ::= longint
+integer_vector_type ::= bit
+simple_type ::= integer_type
+signing ::= unsigned
+basic_data_type ::=
+ simple_type [ signing ]
+ | string
+ | boolean
+ | id
+data_type ::=
+ basic_data_type
+ | accesstype
+ | addressingtype
+ | onreadtype
+ | onwritetype
+B.15 Literals
+boolean_literal ::= true | false
+number ::= number as specified in 4.6
+string_literal ::= string as specified in 4.5
+enumerator_literal ::= id :: id
+accesstype_literal ::= na | rw | wr | r | w | rw1 | w1
+onreadtype_literal ::= rclr | rset | ruser
+onwritetype_literal ::= woset | woclr | wot | wzs | wzc | wzt | wclr | wset | wuser
+addressingtype_literal ::= compact | regalign | fullalign
+precedencetype_literal ::= hw | sw
+B.16 Expressions
+constant_expression ::=
+ constant_primary
+ | unary_operator constant_primary
+ | constant_expression binary_operator constant_expression
+ | constant_expression ? constant_expression : constant_expression
+constant_primary ::=
+ primary_literal
+ | constant_concatenation
+ | constant_multiple_concatenation
+ | ( constant_expression )
+ | constant_cast
+ | instance_or_prop_ref
+ | struct_literal
+ | array_literal
+primary_literal ::=
+ number
+ | string_literal
+ | boolean_literal
+ | accesstype_literal
+ | onreadtype_literal
+ | onwritetype_literal
+ | addressingtype_literal
+ | enumerator_literal
+ | this
+112 Copyright © 2015 - 2018 Accellera.
+All rights reserved.
+January 2018 SystemRDL 2.0
+binary_operator ::=
+ && | || | < | > | <= | >= | == | != | >> | <<
+ | & | | | ^ | ~^| ^~ | * | / | % | + | - | **
+unary_operator :
+ ! | + | - | ~ | & | ~& | | | ~| | ^ | ~^ | ^~
+constant_cast ::= casting_type ' ( constant_expression )
+casting_type ::= simple_type | constant_primary | boolean
+B.17 Identifiers
+id ::= identifier as specified in 4.3
