@@ -64,6 +64,14 @@ pub Expr: Expr = {
     "~^" <e:Expr> => Expr::Reduct { op: ReductOp::Xor, rhs: Box::new(e) },
     #[precedence(level="0")]
     "^~" <e:Expr> => Expr::Reduct { op: ReductOp::Xor, rhs: Box::new(e) },
+    // Additional unary reduction operators (plain forms)
+    #[precedence(level="0")]
+    "&" <e:Expr> => Expr::Reduct { op: ReductOp::And, rhs: Box::new(e) },
+    #[precedence(level="0")]
+    "|" <e:Expr> => Expr::Reduct { op: ReductOp::Or, rhs: Box::new(e) },
+    #[precedence(level="0")]
+    "^" <e:Expr> => Expr::Reduct { op: ReductOp::Xor, rhs: Box::new(e) },
+    // (removed standalone unary & | ^ reduction operators for performance)
     // Exponentiation (right associative)
     #[precedence(level="1")] #[assoc(side="right")]
     <l:Expr> "**" <r:Expr> => Expr::Binary { op: BinaryOp::Pow, lhs: Box::new(l), rhs: Box::new(r) },
@@ -408,14 +416,14 @@ InstAddr: () = { ("@" Expr)? => () }; // retained for AnonComponentWithInst
 // removed simple PropertyAssign to avoid ambiguity; LocalPropAssign handles '=' case
 
 LocalPropAssign: LocalPropAssign = {
-    "default" <p:Ident> "=" <e:Expr> => LocalPropAssign { is_default: true, prop: p, value: Some(e) },
-    <p:Ident> "=" <e:Expr> => LocalPropAssign { is_default: false, prop: p, value: Some(e) },
+    "default" <p:Ident> "=" <e:Expr> => LocalPropAssign { is_default: true, prop: p, value: Some(e), modifier: None },
+    <p:Ident> "=" <e:Expr> => LocalPropAssign { is_default: false, prop: p, value: Some(e), modifier: None },
     // Allow property names that are special literal keywords
-    "sw" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "sw".into(), value: Some(e) },
-    "hw" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "hw".into(), value: Some(e) },
-    "name" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "name".into(), value: Some(e) },
-    "desc" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "desc".into(), value: Some(e) },
-    "reset" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "reset".into(), value: Some(e) },
+    "sw" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "sw".into(), value: Some(e), modifier: None },
+    "hw" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "hw".into(), value: Some(e), modifier: None },
+    "name" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "name".into(), value: Some(e), modifier: None },
+    "desc" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "desc".into(), value: Some(e), modifier: None },
+    "reset" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "reset".into(), value: Some(e), modifier: None },
 };
 DynPropAssign: DynPropAssign = {
     <t:InstanceRef> "->" <p:Ident> "=" <e:Expr> => DynPropAssign { target: t, prop: p, value: Some(e) },
@@ -432,9 +440,7 @@ InstanceRefTail: InstanceRefElem = {
 InstanceRefElem: InstanceRefElem = {
     <id:Ident> <s:InstRefArraySuffix*> => InstanceRefElem { ident: id, array_suffixes: s },
 };
-InstRefArraySuffix: Option<Expr> = {
-    "[" <e:Expr> "]" => Some(e),
-};
+InstRefArraySuffix: Option<Expr> = { "[" <e:ConstExpr> "]" => Some(e) };
 
 pub ComponentNamedDef: ComponentDef = { <t:ComponentTypePrimary> <n:Ident> <params:ParamDefOpt> <_b:ComponentBody> => ComponentDef { ctype: t, name: n, params }, };
 
@@ -522,13 +528,10 @@ ParamInst: Vec<ParamAssign> = { "#" "(" <v:ParamAssignList?> ")" => v.unwrap_or_
 ParamAssignList: Vec<ParamAssign> = { <h:ParamAssignment> "," <t:ParamAssignList> => { let mut v=vec![h]; v.extend(t); v }, <one:ParamAssignment> => vec![one] };
 ParamAssignment: ParamAssign = { "." <id:Ident> "(" <e:Expr> ")" => { if expr_contains_propref(&e) { panic!("property reference not allowed in parameter assignment"); } ParamAssign { name:id, value:e } } };
 
-EnumEntries: Vec<EnumEntry> = {
-    <h:EnumEntry> <t:EnumEntries> => { let mut v=vec![h]; v.extend(t); v },
-    <l:EnumEntry> => vec![l],
-};
+EnumEntries: Vec<EnumEntry> = { <h:EnumEntry> <t:EnumEntries> => { let mut v=vec![h]; v.extend(t); v }, <l:EnumEntry> => vec![l] };
 EnumEntry: EnumEntry = {
-    <n:Ident> "=" <e:Expr> ";" => EnumEntry { name: n, value: Some(e) },
-    <n:Ident> ";" => EnumEntry { name: n, value: None },
+    <n:Ident> "=" <e:Expr> ";" => EnumEntry { name: n, value: Some(e), props: vec![] },
+    <n:Ident> ";" => EnumEntry { name: n, value: None, props: vec![] },
 };
 pub EnumDef: EnumDef = {
     "enum" <n:Ident> "{" <ents:EnumEntries> "}" => EnumDef { name: n, entries: ents },
@@ -590,6 +593,9 @@ pub ConstExpr: Expr = {
     #[precedence(level="0")] "~|" <e:ConstExpr> => Expr::Reduct { op: ReductOp::Or, rhs: Box::new(e) },
     #[precedence(level="0")] "~^" <e:ConstExpr> => Expr::Reduct { op: ReductOp::Xor, rhs: Box::new(e) },
     #[precedence(level="0")] "^~" <e:ConstExpr> => Expr::Reduct { op: ReductOp::Xor, rhs: Box::new(e) },
+    #[precedence(level="0")] "&" <e:ConstExpr> => Expr::Reduct { op: ReductOp::And, rhs: Box::new(e) },
+    #[precedence(level="0")] "|" <e:ConstExpr> => Expr::Reduct { op: ReductOp::Or, rhs: Box::new(e) },
+    #[precedence(level="0")] "^" <e:ConstExpr> => Expr::Reduct { op: ReductOp::Xor, rhs: Box::new(e) },
     #[precedence(level="1")] #[assoc(side="right")] <l:ConstExpr> "**" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Pow, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="2")] #[assoc(side="left")] <l:ConstExpr> "*" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Mul, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="2")] #[assoc(side="left")] <l:ConstExpr> "/" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Div, lhs: Box::new(l), rhs: Box::new(r) },

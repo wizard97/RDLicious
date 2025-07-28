@@ -40,6 +40,7 @@ pub struct EnumDef {
 pub struct EnumEntry {
     pub name: String,
     pub value: Option<Expr>,
+    pub props: Vec<(String, Expr)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,6 +76,7 @@ pub struct LocalPropAssign {
     pub is_default: bool,
     pub prop: String,
     pub value: Option<Expr>,
+    pub modifier: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -126,6 +128,7 @@ pub enum Expr {
         target: Vec<InstanceRefElem>,
         prop: String,
     },
+    InstanceRef(Vec<InstanceRefElem>),
     Concat(Vec<Expr>),
     Replicate {
         count: Box<Expr>,
