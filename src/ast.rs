@@ -253,3 +253,24 @@ pub enum DataType {
     OnWriteType,
     Other(String),
 }
+
+// Helper to detect disallowed property references in constant contexts
+pub fn expr_contains_propref(e: &Expr) -> bool {
+    match e {
+        Expr::PropRef { .. } => true,
+        Expr::Unary { rhs, .. } | Expr::Reduct { rhs, .. } => expr_contains_propref(rhs),
+        Expr::Binary { lhs, rhs, .. } => expr_contains_propref(lhs) || expr_contains_propref(rhs),
+        Expr::Ternary { cond, then_br, else_br } => {
+            expr_contains_propref(cond)
+                || expr_contains_propref(then_br)
+                || expr_contains_propref(else_br)
+        }
+        Expr::CastType { expr, .. } | Expr::CastWidth { expr, .. } => expr_contains_propref(expr),
+        Expr::Concat(v) | Expr::ArrayLiteral(v) => v.iter().any(expr_contains_propref),
+        Expr::Replicate { count, elems } => {
+            expr_contains_propref(count) || elems.iter().any(expr_contains_propref)
+        }
+        Expr::StructLiteral { kv, .. } => kv.iter().any(|(_, ex)| expr_contains_propref(ex)),
+        _ => false,
+    }
+}

@@ -305,6 +305,19 @@ fn component_with_params() {
 }
 
 #[test]
+fn parameter_constexpr_enforced() {
+    // Property reference in parameter default should fail (not a constexpr subset)
+    let bad = "reg R #( number A = some_reg->reset ) {}"; // prop ref not allowed in ConstExpr
+    let res = std::panic::catch_unwind(|| {
+        let _ = grammar::ComponentNamedDefParser::new().parse(bad);
+    });
+    assert!(res.is_err(), "prop ref should trigger rejection (panic) in parameter default constexpr");
+    // Basic arithmetic ok
+    let good = "reg R #( number W = 4*2 ) {}";
+    grammar::ComponentNamedDefParser::new().parse(good).unwrap();
+}
+
+#[test]
 fn component_def_with_insts() {
     let test = r#"
         reg my_reg { width = 32; } my_reg_inst0, my_reg_inst1[3];

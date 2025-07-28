@@ -5,7 +5,7 @@ use crate::ast::*;
 // Lexer: a pragmatic subset of SystemRDL tokens needed for the implemented grammar.
 match {
     // Keywords and multi-char ops first so they are not lexed as generic ID
-    "addrmap","regfile","reg","field","mem","signal","enum","struct","abstract","default","external","internal","true","false","property","type","component","constraint","all","alias","bit","longint","boolean",
+    "addrmap","regfile","reg","field","mem","signal","enum","struct","abstract","default","external","internal","true","false","property","type","component","constraint","all","alias","bit","longint","boolean","number",
     // Literal keywords (lowercase subset)
     "na","rw","wr","r","w","rw1","w1",
     "rclr","rset","ruser",
@@ -320,7 +320,6 @@ UntypedExplicitInst: ExplicitComponentInst = {
 };
 // Ordered instantiation modifiers parsed via recursive descent style to avoid
 // ambiguity for optional sequences. Order: = @ += %= (each at most once)
-ConstExpr: Expr = { <e:Expr> => e };
 InstModSeq: (Option<Expr>,Option<Expr>,Option<Expr>,Option<Expr>) = {
     // empty
     => (None,None,None,None),
@@ -510,17 +509,18 @@ ParamDefElemList: Vec<ParamDecl> = {
 ParamDefElemListTail: Vec<ParamDecl> = {
     "," <n:ParamDefElem> <rest:ParamDefElemListTail?> => { let mut v=vec![n]; if let Some(mut r)=rest { v.append(&mut r);} v },
 };
-ParamDefElem: ParamDecl = { <dt:DataType> <name:Ident> ParamArrayType? <def:ParamDefault?> => ParamDecl { data_type: dt, name, default: def }, };
+ParamDefElem: ParamDecl = { <dt:DataType> <name:Ident> ParamArrayType? <def:ParamDefault?> => {
+        if let Some(ref e) = def { if expr_contains_propref(e) { panic!("property reference not allowed in parameter default"); } }
+        ParamDecl { data_type: dt, name, default: def }
+    }, };
 ParamArrayType: () = {
     "[" "]" => (),
 };
-ParamDefault: Expr = {
-    "=" <e:Expr> => e,
-};
+ParamDefault: Expr = { "=" <e:Expr> => { if expr_contains_propref(&e) { panic!("property reference not allowed in parameter default"); } e } };
 
 ParamInst: Vec<ParamAssign> = { "#" "(" <v:ParamAssignList?> ")" => v.unwrap_or_default() };
 ParamAssignList: Vec<ParamAssign> = { <h:ParamAssignment> "," <t:ParamAssignList> => { let mut v=vec![h]; v.extend(t); v }, <one:ParamAssignment> => vec![one] };
-ParamAssignment: ParamAssign = { "." <id:Ident> "(" <e:Expr> ")" => ParamAssign { name:id, value:e } };
+ParamAssignment: ParamAssign = { "." <id:Ident> "(" <e:Expr> ")" => { if expr_contains_propref(&e) { panic!("property reference not allowed in parameter assignment"); } ParamAssign { name:id, value:e } } };
 
 EnumEntries: Vec<EnumEntry> = {
     <h:EnumEntry> <t:EnumEntries> => { let mut v=vec![h]; v.extend(t); v },
@@ -578,3 +578,62 @@ ConcatList: Vec<Expr> = {
     <e:Expr> => vec![e],
 };
 ReplicateExpr: Expr = { "{" <cnt:Expr> <c:ConcatExpr> "}" => match c { Expr::Concat(v) => Expr::Replicate { count: Box::new(cnt), elems: v }, _ => unreachable!() } };
+
+// Constant expression subset (excludes property references)
+pub ConstExpr: Expr = {
+    #[precedence(level="0")] ConstPrimary,
+    #[precedence(level="0")] "+" <e:ConstExpr> => Expr::Unary { op: UnaryOp::Plus, rhs: Box::new(e) },
+    #[precedence(level="0")] "-" <e:ConstExpr> => Expr::Unary { op: UnaryOp::Minus, rhs: Box::new(e) },
+    #[precedence(level="0")] "!" <e:ConstExpr> => Expr::Unary { op: UnaryOp::Not, rhs: Box::new(e) },
+    #[precedence(level="0")] "~" <e:ConstExpr> => Expr::Unary { op: UnaryOp::BitNot, rhs: Box::new(e) },
+    #[precedence(level="0")] "~&" <e:ConstExpr> => Expr::Reduct { op: ReductOp::And, rhs: Box::new(e) },
+    #[precedence(level="0")] "~|" <e:ConstExpr> => Expr::Reduct { op: ReductOp::Or, rhs: Box::new(e) },
+    #[precedence(level="0")] "~^" <e:ConstExpr> => Expr::Reduct { op: ReductOp::Xor, rhs: Box::new(e) },
+    #[precedence(level="0")] "^~" <e:ConstExpr> => Expr::Reduct { op: ReductOp::Xor, rhs: Box::new(e) },
+    #[precedence(level="1")] #[assoc(side="right")] <l:ConstExpr> "**" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Pow, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="2")] #[assoc(side="left")] <l:ConstExpr> "*" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Mul, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="2")] #[assoc(side="left")] <l:ConstExpr> "/" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Div, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="2")] #[assoc(side="left")] <l:ConstExpr> "%" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Mod, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="3")] #[assoc(side="left")] <l:ConstExpr> "+" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Add, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="3")] #[assoc(side="left")] <l:ConstExpr> "-" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Sub, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="4")] #[assoc(side="left")] <l:ConstExpr> "<<" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Shl, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="4")] #[assoc(side="left")] <l:ConstExpr> ">>" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Shr, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="5")] #[assoc(side="left")] <l:ConstExpr> "<" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Lt, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="5")] #[assoc(side="left")] <l:ConstExpr> "<=" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Le, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="5")] #[assoc(side="left")] <l:ConstExpr> ">" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Gt, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="5")] #[assoc(side="left")] <l:ConstExpr> ">=" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Ge, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="6")] #[assoc(side="left")] <l:ConstExpr> "==" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Eq, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="6")] #[assoc(side="left")] <l:ConstExpr> "!=" <r:ConstExpr> => Expr::Binary { op: BinaryOp::Ne, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="7")] #[assoc(side="left")] <l:ConstExpr> "&" <r:ConstExpr> => Expr::Binary { op: BinaryOp::BitAnd, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="8")] #[assoc(side="left")] <l:ConstExpr> "^" <r:ConstExpr> => Expr::Binary { op: BinaryOp::BitXor, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="8")] #[assoc(side="left")] <l:ConstExpr> "~^" <r:ConstExpr> => Expr::Binary { op: BinaryOp::BitXnor, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="8")] #[assoc(side="left")] <l:ConstExpr> "^~" <r:ConstExpr> => Expr::Binary { op: BinaryOp::BitXnor, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="9")] #[assoc(side="left")] <l:ConstExpr> "|" <r:ConstExpr> => Expr::Binary { op: BinaryOp::BitOr, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="10")] #[assoc(side="left")] <l:ConstExpr> "&&" <r:ConstExpr> => Expr::Binary { op: BinaryOp::LogAnd, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="11")] #[assoc(side="left")] <l:ConstExpr> "||" <r:ConstExpr> => Expr::Binary { op: BinaryOp::LogOr, lhs: Box::new(l), rhs: Box::new(r) },
+    #[precedence(level="12")] #[assoc(side="right")] <c:ConstExpr> "?" <t:ConstExpr> ":" <e:ConstExpr> => Expr::Ternary { cond: Box::new(c), then_br: Box::new(t), else_br: Box::new(e) },
+};
+ConstPrimary: Expr = {
+    ConstCastExpr,
+    ConstReplicateExpr,
+    ConstConcatExpr,
+    EnumLit,
+    StructLit,
+    ArrayLit,
+    BoolLit,
+    SpecialLit,
+    Number,
+    String => Expr::Literal(Literal::Str(<>)),
+    Ident => Expr::Ident(<>),
+    "(" <e:ConstExpr> ")" => e,
+};
+ConstCastExpr: Expr = {
+    "boolean" "'" "(" <e:ConstExpr> ")" => Expr::CastType { ty: CastPrimType::Boolean, expr: Box::new(e) },
+    "bit" "'" "(" <e:ConstExpr> ")" => Expr::CastType { ty: CastPrimType::Bit, expr: Box::new(e) },
+    "longint" "'" "(" <e:ConstExpr> ")" => Expr::CastType { ty: CastPrimType::LongInt, expr: Box::new(e) },
+    <w:ConstCastWidthExpr> "'" "(" <e:ConstExpr> ")" => Expr::CastWidth { width: Box::new(w), expr: Box::new(e) },
+};
+ConstCastWidthExpr: Expr = { Number, "(" <e:ConstExpr> ")" => e };
+ConstConcatExpr: Expr = { "{" <l:ConstConcatList?> "}" => Expr::Concat(l.unwrap_or_default()) };
+ConstConcatList: Vec<Expr> = { <h:ConstExpr> "," <t:ConstConcatList> => { let mut v=vec![h]; v.extend(t); v }, <e:ConstExpr> => vec![e] };
+ConstReplicateExpr: Expr = { "{" <cnt:ConstExpr> <c:ConstConcatExpr> "}" => match c { Expr::Concat(v) => Expr::Replicate { count: Box::new(cnt), elems: v }, _ => unreachable!() } };
