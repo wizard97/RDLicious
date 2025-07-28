@@ -1,190 +1,253 @@
-use std::str::FromStr;
+// NOTE: This is a partial translation of the SystemRDL.g4 grammar to LALRPOP.
+// It focuses on the high-level structure needed by the current tests:
+//  - Root containing a list of component or enum definitions terminated by ';'
+//  - Component named definitions with an (empty) body
+//  - Enum definitions with entries
+//  - A very small expression grammar (currently just numeric literals or IDs)
+// The intent is to extend this incrementally to cover more of SystemRDL.
 
 grammar;
 
-// Literals.
+use crate::ast::*;
+
+// ---------------------------- LEXER ---------------------------------------
 match {
+    // Numbers (decimal & hex)
     r"[0-9]+" => INT,
     r"0x[0-9a-fA-F]+" => HEX_LOW,
     r"0X[0-9a-fA-F]+" => HEX_UPPER,
-    r"[a-zA-Z][a-zA-Z0-9_]*" => ID,
-    "boolean",
-    "bit",
-    "longint",
-    "unsigned",
-    "string",
-    "accesstype",
-    "addressingtype",
-    "onreadtype",
-    "onwritetype",
 
-    "alias",
-    "external",
-    "internal",
+    // Identifiers
+    r"[a-zA-Z_][a-zA-Z0-9_]*" => ID,
 
+    // Keywords we currently distinguish explicitly
     "addrmap",
     "regfile",
     "reg",
     "field",
     "mem",
-    "signal",
-
-    "true",
-    "false",
-
-    "na",
-    "rw",
-    "wr",
-    "r",
-    "w",
-    "rw1",
-    "w1",
-    "rclr",
-    "rset",
-    "ruser",
-    "woset",
-    "woclr",
-    "wot",
-    "wzs",
-    "wzc",
-    "wzt",
-    "wclr",
-    "wset",
-    "wuser",
-    "compact",
-    "regalign",
-    "fullalign",
-    "hw",
-    "sw",
-
-    "posedge",
-    "negedge",
-    "bothedge",
-    "level",
-    "nonsticky",
-
-    "abstract",
-    "all",
-    "component",
-    "componentwidth",
-    "constraint",
-    "default",
     "enum",
-    "encode",
-    "inside",
-    "number",
-    "property",
-    "ref",
-    "struct",
-    "this",
-    "type",
 
-    "alternate",
-    "byte",
-    "int",
-    "precedencetype",
-    "real",
-    "shortint",
-    "shortreal",
-    "signed",
-    "with",
-    "within",
-
+    // Operators & punctuation used so far
+    "**",
+    "<<",
+    ">>",
+    "==",
+    "!=",
+    "<=",
+    ">=",
+    "&&",
+    "||",
+    "=",
+    "[",
+    "]",
+    "@",
+    "{",
+    "}",
+    ";",
+    ",",
+    "(",
+    ")",
+    "?",
+    ":",
     "+",
     "-",
-    "!",
-    "~",
-    "&&",
-    "~&",
+    "*",
+    "/",
+    "%",
     "&",
     "|",
-    "||",
-    "~|",
     "^",
     "~^",
     "^~",
-    "<<",
-    ">>",
-    "*",
-    "**",
-    "/",
-    "%",
-    "==",
-    "=",
-    "!=",
-    "<=",
+    "!",
+    "~",
     "<",
-    ">=",
     ">",
 
-    "@",
-    "+=",
-    "%=",
-
-    "(",
-    ")",
-
-    // Skip whitespace and comments
-    r"\s*" => { },
-    r"//[^\n\r]*[\n\r]*" => { }, // `// comment`
-    r"/\*([^\*]*\*+[^\*/])*([^\*]*\*+|[^\*])*\*/" => { }, // `/* comment */`
+    // Whitespace & comments
+    r"[ \t\r\n]+" => { },
+    r"//[^\n\r]*" => { },
+    r"/\*([^*]*\*+[^*/])*([^*]*\*+|[^*])*\*/" => { },
+    r#"\"([^"\\]|\\.)*\""# => STRING,
     _
 }
 
-pub ComponentTypePrimary : i32 = {
-    "addrmap" => 0,
-    "regfile" => 1,
-    "reg" => 2,
-    "field" => 3,
-    "mem" => 4,
+// ---------------------------- AST TYPES -----------------------------------
+
+// AST definitions live in ast.rs. Here we just build them.
+
+// ---------------------------- PARSER RULES --------------------------------
+
+Ident: String = {
+    <s:ID> => s.to_string(),
 };
 
-
-ComponentBody : i32 = {
-  "{" "}" ";" => 0,
+Number: String = {
+    <s:INT> => s.to_string(),
+    <s:HEX_LOW> => s.to_string(),
+    <s:HEX_UPPER> => s.to_string(),
 };
 
-// ParameterizationDef : i32 = {
-//     "#" '('  => 0,
-// };
+String: String = { <s:STRING> => s.to_string() };
 
-pub Root : i32 = {
-    <c:ComponentNamedDef> => 0,
-    <r:Root> <c:ComponentNamedDef> => 0,
+pub Expr: Expr = Ternary;
+
+Ternary: Expr = {
+    <c:LogicOr> "?" <t:Expr> ":" <e:Expr> => Expr::Ternary { cond: Box::new(c), then_br: Box::new(t), else_br: Box::new(e) },
+    LogicOr => <>,
 };
 
-pub EnumEntry : i32 = {
-    ID "=" <e:Expr> ";" => 0,
+LogicOr: Expr = {
+    <l:LogicOr> "||" <r:LogicAnd> => Expr::Binary { op: "||".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    LogicAnd => <>,
 };
 
-EnumEntries : i32 = {
-    <e:EnumEntry> => 0,
-    <all:EnumEntries> <e:EnumEntry> => 0,
+LogicAnd: Expr = {
+    <l:LogicAnd> "&&" <r:BitOr> => Expr::Binary { op: "&&".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    BitOr => <>,
 };
 
-pub EnumDef : i32 = {
-    "enum" ID "{" <e:EnumEntries> "}" => 0,
+BitOr: Expr = {
+    <l:BitOr> "|" <r:BitXor> => Expr::Binary { op: "|".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    BitXor => <>,
 };
 
-pub ComponentNamedDef : i32 = {
-    <t:ComponentTypePrimary> ID <b:ComponentBody> => 0,
+BitXor: Expr = {
+    <l:BitXor> "^" <r:BitAnd> => Expr::Binary { op: "^".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:BitXor> "~^" <r:BitAnd> => Expr::Binary { op: "~^".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:BitXor> "^~" <r:BitAnd> => Expr::Binary { op: "^~".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    BitAnd => <>,
 };
 
-Number : i32 = {
-    INT => 0,
-    HEX_LOW => 0,
-    HEX_UPPER => 0,
+BitAnd: Expr = {
+    <l:BitAnd> "&" <r:Equality> => Expr::Binary { op: "&".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    Equality => <>,
 };
 
-
-Literal : i32 = {
-    Number => 0,
+Equality: Expr = {
+    <l:Equality> "==" <r:Relational> => Expr::Binary { op: "==".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Equality> "!=" <r:Relational> => Expr::Binary { op: "!=".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    Relational => <>,
 };
 
-PrimaryExpr : i32 = {
-    Literal => 0,
+Relational: Expr = {
+    <l:Relational> "<" <r:Shift> => Expr::Binary { op: "<".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Relational> "<=" <r:Shift> => Expr::Binary { op: "<=".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Relational> ">" <r:Shift> => Expr::Binary { op: ">".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Relational> ">=" <r:Shift> => Expr::Binary { op: ">=".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    Shift => <>,
 };
 
-Expr : i32 = {
-    <l:PrimaryExpr> => 0,
+Shift: Expr = {
+    <l:Shift> "<<" <r:Add> => Expr::Binary { op: "<<".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Shift> ">>" <r:Add> => Expr::Binary { op: ">>".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    Add => <>,
+};
+
+Add: Expr = {
+    <l:Add> "+" <r:Mul> => Expr::Binary { op: "+".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Add> "-" <r:Mul> => Expr::Binary { op: "-".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    Mul => <>,
+};
+
+Mul: Expr = {
+    <l:Mul> "*" <r:Unary> => Expr::Binary { op: "*".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Mul> "/" <r:Unary> => Expr::Binary { op: "/".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Mul> "%" <r:Unary> => Expr::Binary { op: "%".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    Unary => <>,
+};
+
+Unary: Expr = {
+    "+" <u:Unary> => Expr::Unary { op: "+".into(), rhs: Box::new(u) },
+    "-" <u:Unary> => Expr::Unary { op: "-".into(), rhs: Box::new(u) },
+    "!" <u:Unary> => Expr::Unary { op: "!".into(), rhs: Box::new(u) },
+    "~" <u:Unary> => Expr::Unary { op: "~".into(), rhs: Box::new(u) },
+    Primary => <>,
+};
+
+Primary: Expr = {
+    Number => Expr::Number(<>),
+    Ident  => Expr::Ident(<>),
+    String => Expr::Str(<>),
+    "(" <e:Expr> ")" => e,
+};
+
+pub Root: Root = {
+    <v:RootItems> => Root(v),
+    => Root(vec![]),
+};
+
+RootItems: Vec<RootItem> = {
+    <head:RootItem> ";" <tail:RootItems> => {
+        let mut v = vec![head];
+        v.extend(tail);
+        v
+    },
+    <single:RootItem> ";" => vec![single],
+};
+
+RootItem: RootItem = {
+    ComponentNamedDef => RootItem::Component(<>),
+    EnumDef => RootItem::Enum(<>),
+};
+
+ComponentTypePrimary: ComponentTypePrimary = {
+    "addrmap" => ComponentTypePrimary::Addrmap,
+    "regfile" => ComponentTypePrimary::Regfile,
+    "reg" => ComponentTypePrimary::Reg,
+    "field" => ComponentTypePrimary::Field,
+    "mem" => ComponentTypePrimary::Mem,
+};
+
+ComponentBody: () = {
+    "{" (ComponentBodyItem ";")* "}" => (),
+};
+
+ComponentBodyItem: () = {
+    AnonComponentWithInst => (),
+    ComponentNamedDef => (),
+    SimpleInst => (),
+    PropertyAssign => (),
+};
+
+AnonComponentWithInst: () = { // e.g., reg { ... } reg_foo
+    ComponentTypePrimary ComponentBody Ident InstSuffixes? InstAddr? => (),
+};
+
+SimpleInst: () = { // e.g., mem_mem mem_inst;
+    ExtKw? Ident Ident InstSuffixes? InstAddr? => (),
+};
+
+ExtKw: () = { "external" => () };
+
+InstSuffixes: () = { RangeSuffixes => () };
+RangeSuffixes: () = { RangeSuffix RangeSuffixes => (), RangeSuffix => (), ArraySuffix RangeSuffixes => (), ArraySuffix => () };
+RangeSuffix: () = { "[" Expr ":" Expr "]" => () };
+ArraySuffix: () = { "[" Expr "]" => () };
+InstAddr: () = { "@" Expr => () };
+
+PropertyAssign: () = {
+    Ident "=" Expr => (),
+};
+
+pub ComponentNamedDef: ComponentDef = {
+    <t:ComponentTypePrimary> <n:Ident> <_b:ComponentBody> => ComponentDef { ctype: t, name: n },
+};
+
+EnumEntries: Vec<EnumEntry> = {
+    <head:EnumEntry> <tail:EnumEntries> => {
+        let mut v = vec![head];
+        v.extend(tail); v
+    },
+    <last:EnumEntry> => vec![last],
+};
+
+EnumEntry: EnumEntry = {
+    <n:Ident> "=" <e:Expr> ";" => EnumEntry { name: n, value: Some(e) },
+    <n:Ident> ";" => EnumEntry { name: n, value: None },
+};
+
+pub EnumDef: EnumDef = {
+    "enum" <n:Ident> "{" <ents:EnumEntries> "}" => EnumDef { name: n, entries: ents },
 };
