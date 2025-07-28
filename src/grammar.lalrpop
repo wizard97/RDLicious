@@ -12,7 +12,7 @@ match {
     "woset","woclr","wot","wzs","wzc","wzt","wclr","wset","wuser",
     "compact","regalign","fullalign","hw","sw",
     // property keywords
-    "name","desc","reset",
+    "name","desc","reset","componentwidth",
     "**","<<",">>","==","!=","<=",">=","&&","||","~&","~|",
     "=","+=","%=","[","]","@","->","::","{","}",";",",",".","#",
     // Verilog-style number (width'basevalue). Place before standalone ' token.
@@ -471,8 +471,8 @@ UDPAttr: UDPAttr = {
     "type" "=" <dt:PropertyDataType> <arr:UDPArray?> => UDPAttr::Type { data_type: dt, is_array: arr.is_some() },
     "default" "=" <e:ConstExpr> => UDPAttr::Default(e),
     "component" "=" <ts:PropertyCompTypes> => UDPAttr::Usage(ts),
+    // Per spec only 'componentwidth' is allowed as constraint value
     "constraint" "=" "componentwidth" => UDPAttr::Constraint("componentwidth".into()),
-    "constraint" "=" <c:Ident> => UDPAttr::Constraint(c),
 };
 UDPArray: () = {
     "[" "]" => (),

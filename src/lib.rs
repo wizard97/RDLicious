@@ -169,6 +169,37 @@ fn super_complicated() {
 }
 
 #[test]
+fn udp_basic() {
+    let txt = r#"
+        property my_prop {
+            type = bit unsigned;
+            default = 5;
+            component = reg|field;
+            constraint = componentwidth;
+        };
+    "#;
+    let root = grammar::RootParser::new().parse(txt).unwrap();
+    assert_eq!(root.0.len(), 1);
+    match &root.0[0] {
+        ast::RootItem::Udp(u) => {
+            assert_eq!(u.name, "my_prop");
+            assert_eq!(u.attrs.len(), 4);
+        }
+        _ => panic!("expected UDP"),
+    }
+}
+
+#[test]
+fn udp_variations() {
+    let txt = r#"
+        property array_prop { type = longint[]; component = all; };
+        property ref_prop { type = ref; default = 0x10; component = addrmap|regfile|reg; };
+    "#;
+    let root = grammar::RootParser::new().parse(txt).unwrap();
+    assert_eq!(root.0.len(), 2);
+}
+
+#[test]
 fn root_with_modifiers() {
     let test = r#"
         // Define a base component
@@ -319,6 +350,83 @@ fn inst_with_param_assign() {
     let test = r#"reg MyReg {};"#;
     let root = grammar::RootParser::new().parse(test).unwrap();
     assert_eq!(root.0.len(), 1);
+}
+
+// ---------------- component_inst focus tests ----------------
+#[test]
+fn component_inst_basic_reset() {
+    // Single component definition followed by two instantiations – one with reset (=) only
+    let src = r#"
+        reg MyReg { } MyRegInst0 = 5, MyRegInst1;
+    "#;
+    let root = grammar::RootParser::new().parse(src).unwrap();
+    // Expect component def + explicit inst list
+    assert_eq!(root.0.len(), 2);
+    match &root.0[1] {
+        ast::RootItem::ExplicitInst(e) => {
+            assert_eq!(e.instances.len(), 2);
+            assert!(e.instances[0].init_expr.is_some());
+            assert!(e.instances[1].init_expr.is_none());
+        }
+        _ => panic!("expected inst list"),
+    }
+}
+
+#[test]
+fn component_inst_array_and_range() {
+    let src = r#"
+        reg R { } R0[4][2], R1[7:0];
+    "#;
+    let root = grammar::RootParser::new().parse(src).unwrap();
+    assert_eq!(root.0.len(), 2);
+    if let ast::RootItem::ExplicitInst(e) = &root.0[1] {
+        assert_eq!(e.instances.len(), 2);
+        // First has two array dimensions
+        assert_eq!(e.instances[0].array_dims.len(), 2);
+        assert!(e.instances[0].range.is_none());
+        // Second has a range
+        assert!(e.instances[1].range.is_some());
+        assert!(e.instances[1].array_dims.is_empty());
+    } else {
+        panic!();
+    }
+}
+
+#[test]
+fn component_inst_all_modifiers() {
+    let src = r#"
+        reg B { } instA = 1 @ 0x10 += 4 %= 16;
+    "#;
+    let root = grammar::RootParser::new().parse(src).unwrap();
+    assert_eq!(root.0.len(), 2);
+    if let ast::RootItem::ExplicitInst(e) = &root.0[1] {
+        assert_eq!(e.instances.len(), 1);
+        let i = &e.instances[0];
+        assert!(i.init_expr.is_some());
+        assert!(i.addr_expr.is_some());
+        assert!(i.stride_expr.is_some());
+        assert!(i.align_expr.is_some());
+    } else {
+        panic!();
+    }
+}
+
+#[test]
+fn component_inst_param_inst_and_mods() {
+    let src = r#"
+        reg P #( number W=8 ) { } #( .W(16) ) p0[2] = 0 @ 0x0;
+    "#;
+    let root = grammar::RootParser::new().parse(src).unwrap();
+    // def + instantiation
+    assert_eq!(root.0.len(), 2);
+    if let ast::RootItem::ExplicitInst(e) = &root.0[1] {
+        assert_eq!(e.param_inst.len(), 1);
+        assert_eq!(e.instances[0].array_dims.len(), 1);
+        assert!(e.instances[0].init_expr.is_some());
+        assert!(e.instances[0].addr_expr.is_some());
+    } else {
+        panic!();
+    }
 }
 
 #[test]
