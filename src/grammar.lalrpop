@@ -5,9 +5,19 @@ use crate::ast::*;
 // Lexer: a pragmatic subset of SystemRDL tokens needed for the implemented grammar.
 match {
     // Keywords and multi-char ops first so they are not lexed as generic ID
-    "addrmap","regfile","reg","field","mem","enum","struct","abstract","default","external","internal","true","false","property","type","component","constraint","all","signal","alias",
+    "addrmap","regfile","reg","field","mem","signal","enum","struct","abstract","default","external","internal","true","false","property","type","component","constraint","all","alias","bit","longint","boolean",
+    // Literal keywords (lowercase subset)
+    "na","rw","wr","r","w","rw1","w1",
+    "rclr","rset","ruser",
+    "woset","woclr","wot","wzs","wzc","wzt","wclr","wset","wuser",
+    "compact","regalign","fullalign","hw","sw",
+    // property keywords
+    "name","desc","reset",
     "**","<<",">>","==","!=","<=",">=","&&","||","~&","~|",
-    "=","+=","%=","[","]","@","->","::","{","}",";",",",".","'","#",
+    "=","+=","%=","[","]","@","->","::","{","}",";",",",".","#",
+    // Verilog-style number (width'basevalue). Place before standalone ' token.
+    r"[0-9]+('[bBoOdDhH][0-9a-fA-F_xXzZ]+)" => VLOG_INT,
+    "'",
     "(",")","?",":","+","-","*","/","%","&","|","^","~^","^~","!","~","<",">",
     r"[0-9]+" => INT,
     r"0x[0-9a-fA-F]+" => HEX_LOW,
@@ -23,10 +33,11 @@ match {
 Ident: String = {
     <s:ID> => s.to_string(),
 };
-Number: String = {
-    <s:INT> => s.to_string(),
-    <s:HEX_LOW> => s.to_string(),
-    <s:HEX_UPPER> => s.to_string(),
+Number: Expr = {
+    <s:INT> => Expr::Literal(Literal::Dec(s.to_string())),
+    <s:HEX_LOW> => Expr::Literal(Literal::Hex(s.to_string())),
+    <s:HEX_UPPER> => Expr::Literal(Literal::Hex(s.to_string())),
+    <s:VLOG_INT> => Expr::Literal(Literal::Verilog { raw: s.to_string() }),
 };
 String: String = {
     <s:STRING> => s.to_string(),
@@ -38,88 +49,141 @@ pub Expr: Expr = {
     #[precedence(level="0")] Primary,
     // Unary prefix (right associative chaining)
     #[precedence(level="0")]
-    "+" <e:Expr> => Expr::Unary { op: "+".into(), rhs: Box::new(e) },
+    "+" <e:Expr> => Expr::Unary { op: UnaryOp::Plus, rhs: Box::new(e) },
     #[precedence(level="0")]
-    "-" <e:Expr> => Expr::Unary { op: "-".into(), rhs: Box::new(e) },
+    "-" <e:Expr> => Expr::Unary { op: UnaryOp::Minus, rhs: Box::new(e) },
     #[precedence(level="0")]
-    "!" <e:Expr> => Expr::Unary { op: "!".into(), rhs: Box::new(e) },
+    "!" <e:Expr> => Expr::Unary { op: UnaryOp::Not, rhs: Box::new(e) },
     #[precedence(level="0")]
-    "~" <e:Expr> => Expr::Unary { op: "~".into(), rhs: Box::new(e) },
+    "~" <e:Expr> => Expr::Unary { op: UnaryOp::BitNot, rhs: Box::new(e) },
+    #[precedence(level="0")]
+    "~&" <e:Expr> => Expr::Reduct { op: ReductOp::And, rhs: Box::new(e) },
+    #[precedence(level="0")]
+    "~|" <e:Expr> => Expr::Reduct { op: ReductOp::Or, rhs: Box::new(e) },
+    #[precedence(level="0")]
+    "~^" <e:Expr> => Expr::Reduct { op: ReductOp::Xor, rhs: Box::new(e) },
+    #[precedence(level="0")]
+    "^~" <e:Expr> => Expr::Reduct { op: ReductOp::Xor, rhs: Box::new(e) },
     // Exponentiation (right associative)
     #[precedence(level="1")] #[assoc(side="right")]
-    <l:Expr> "**" <r:Expr> => Expr::Binary { op: "**".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "**" <r:Expr> => Expr::Binary { op: BinaryOp::Pow, lhs: Box::new(l), rhs: Box::new(r) },
     // Multiplicative
     #[precedence(level="2")] #[assoc(side="left")]
-    <l:Expr> "*" <r:Expr> => Expr::Binary { op: "*".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "*" <r:Expr> => Expr::Binary { op: BinaryOp::Mul, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="2")] #[assoc(side="left")]
-    <l:Expr> "/" <r:Expr> => Expr::Binary { op: "/".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "/" <r:Expr> => Expr::Binary { op: BinaryOp::Div, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="2")] #[assoc(side="left")]
-    <l:Expr> "%" <r:Expr> => Expr::Binary { op: "%".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "%" <r:Expr> => Expr::Binary { op: BinaryOp::Mod, lhs: Box::new(l), rhs: Box::new(r) },
     // Additive
     #[precedence(level="3")] #[assoc(side="left")]
-    <l:Expr> "+" <r:Expr> => Expr::Binary { op: "+".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "+" <r:Expr> => Expr::Binary { op: BinaryOp::Add, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="3")] #[assoc(side="left")]
-    <l:Expr> "-" <r:Expr> => Expr::Binary { op: "-".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "-" <r:Expr> => Expr::Binary { op: BinaryOp::Sub, lhs: Box::new(l), rhs: Box::new(r) },
     // Shifts
     #[precedence(level="4")] #[assoc(side="left")]
-    <l:Expr> "<<" <r:Expr> => Expr::Binary { op: "<<".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "<<" <r:Expr> => Expr::Binary { op: BinaryOp::Shl, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="4")] #[assoc(side="left")]
-    <l:Expr> ">>" <r:Expr> => Expr::Binary { op: ">>".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> ">>" <r:Expr> => Expr::Binary { op: BinaryOp::Shr, lhs: Box::new(l), rhs: Box::new(r) },
     // Relational
     #[precedence(level="5")] #[assoc(side="left")]
-    <l:Expr> "<" <r:Expr> => Expr::Binary { op: "<".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "<" <r:Expr> => Expr::Binary { op: BinaryOp::Lt, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="5")] #[assoc(side="left")]
-    <l:Expr> "<=" <r:Expr> => Expr::Binary { op: "<=".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "<=" <r:Expr> => Expr::Binary { op: BinaryOp::Le, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="5")] #[assoc(side="left")]
-    <l:Expr> ">" <r:Expr> => Expr::Binary { op: ">".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> ">" <r:Expr> => Expr::Binary { op: BinaryOp::Gt, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="5")] #[assoc(side="left")]
-    <l:Expr> ">=" <r:Expr> => Expr::Binary { op: ">=".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> ">=" <r:Expr> => Expr::Binary { op: BinaryOp::Ge, lhs: Box::new(l), rhs: Box::new(r) },
     // Equality
     #[precedence(level="6")] #[assoc(side="left")]
-    <l:Expr> "==" <r:Expr> => Expr::Binary { op: "==".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "==" <r:Expr> => Expr::Binary { op: BinaryOp::Eq, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="6")] #[assoc(side="left")]
-    <l:Expr> "!=" <r:Expr> => Expr::Binary { op: "!".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "!=" <r:Expr> => Expr::Binary { op: BinaryOp::Ne, lhs: Box::new(l), rhs: Box::new(r) },
     // Bitwise AND
     #[precedence(level="7")] #[assoc(side="left")]
-    <l:Expr> "&" <r:Expr> => Expr::Binary { op: "&".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "&" <r:Expr> => Expr::Binary { op: BinaryOp::BitAnd, lhs: Box::new(l), rhs: Box::new(r) },
     // Bitwise XOR variants
     #[precedence(level="8")] #[assoc(side="left")]
-    <l:Expr> "^" <r:Expr> => Expr::Binary { op: "^".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "^" <r:Expr> => Expr::Binary { op: BinaryOp::BitXor, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="8")] #[assoc(side="left")]
-    <l:Expr> "~^" <r:Expr> => Expr::Binary { op: "~^".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "~^" <r:Expr> => Expr::Binary { op: BinaryOp::BitXnor, lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="8")] #[assoc(side="left")]
-    <l:Expr> "^~" <r:Expr> => Expr::Binary { op: "^~".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "^~" <r:Expr> => Expr::Binary { op: BinaryOp::BitXnor, lhs: Box::new(l), rhs: Box::new(r) },
     // Bitwise OR
     #[precedence(level="9")] #[assoc(side="left")]
-    <l:Expr> "|" <r:Expr> => Expr::Binary { op: "|".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "|" <r:Expr> => Expr::Binary { op: BinaryOp::BitOr, lhs: Box::new(l), rhs: Box::new(r) },
     // Logical AND
     #[precedence(level="10")] #[assoc(side="left")]
-    <l:Expr> "&&" <r:Expr> => Expr::Binary { op: "&&".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "&&" <r:Expr> => Expr::Binary { op: BinaryOp::LogAnd, lhs: Box::new(l), rhs: Box::new(r) },
     // Logical OR
     #[precedence(level="11")] #[assoc(side="left")]
-    <l:Expr> "||" <r:Expr> => Expr::Binary { op: "||".into(), lhs: Box::new(l), rhs: Box::new(r) },
+    <l:Expr> "||" <r:Expr> => Expr::Binary { op: BinaryOp::LogOr, lhs: Box::new(l), rhs: Box::new(r) },
     // Ternary conditional (lowest precedence, right associative)
     #[precedence(level="12")] #[assoc(side="right")]
     <c:Expr> "?" <t:Expr> ":" <e:Expr> => Expr::Ternary { cond: Box::new(c), then_br: Box::new(t), else_br: Box::new(e) },
 };
 
 Primary: Expr = {
+    PropRefExpr,
+    CastExpr,
+    ReplicateExpr,
+    ConcatExpr,
     EnumLit,
     StructLit,
     ArrayLit,
     BoolLit,
-    Number => Expr::Number(<>),
-    String => Expr::Str(<>),
+    SpecialLit,
+    Number,
+    String => Expr::Literal(Literal::Str(<>)),
     Ident  => Expr::Ident(<>),
+    "(" <e:Expr> ")" => e,
+};
+
+CastExpr: Expr = {
+    "boolean" "'" "(" <e:Expr> ")" => Expr::CastType { ty: CastPrimType::Boolean, expr: Box::new(e) },
+    "bit" "'" "(" <e:Expr> ")" => Expr::CastType { ty: CastPrimType::Bit, expr: Box::new(e) },
+    "longint" "'" "(" <e:Expr> ")" => Expr::CastType { ty: CastPrimType::LongInt, expr: Box::new(e) },
+    <w:CastWidthExpr> "'" "(" <e:Expr> ")" => Expr::CastWidth { width: Box::new(w), expr: Box::new(e) },
+};
+CastWidthExpr: Expr = {
+    Number,
     "(" <e:Expr> ")" => e,
 };
 
 EnumLit: Expr = {
     <s:Ident> "::" <n:Ident> => Expr::EnumLiteral { scope: s, name: n },
 };
-BoolLit: Expr = {
-    "true" => Expr::Bool(true),
-    "false" => Expr::Bool(false),
+BoolLit: Expr = { "true" => Expr::Literal(Literal::Bool(true)), "false" => Expr::Literal(Literal::Bool(false)) };
+SpecialLit: Expr = {
+    "na" => Expr::Literal(Literal::AccessType("na".into())),
+    "rw" => Expr::Literal(Literal::AccessType("rw".into())),
+    "wr" => Expr::Literal(Literal::AccessType("wr".into())),
+    "r" => Expr::Literal(Literal::AccessType("r".into())),
+    "w" => Expr::Literal(Literal::AccessType("w".into())),
+    "rw1" => Expr::Literal(Literal::AccessType("rw1".into())),
+    "w1" => Expr::Literal(Literal::AccessType("w1".into())),
+    "rclr" => Expr::Literal(Literal::OnReadType("rclr".into())),
+    "rset" => Expr::Literal(Literal::OnReadType("rset".into())),
+    "ruser" => Expr::Literal(Literal::OnReadType("ruser".into())),
+    "woset" => Expr::Literal(Literal::OnWriteType("woset".into())),
+    "woclr" => Expr::Literal(Literal::OnWriteType("woclr".into())),
+    "wot" => Expr::Literal(Literal::OnWriteType("wot".into())),
+    "wzs" => Expr::Literal(Literal::OnWriteType("wzs".into())),
+    "wzc" => Expr::Literal(Literal::OnWriteType("wzc".into())),
+    "wzt" => Expr::Literal(Literal::OnWriteType("wzt".into())),
+    "wclr" => Expr::Literal(Literal::OnWriteType("wclr".into())),
+    "wset" => Expr::Literal(Literal::OnWriteType("wset".into())),
+    "wuser" => Expr::Literal(Literal::OnWriteType("wuser".into())),
+    "compact" => Expr::Literal(Literal::AddressingType("compact".into())),
+    "regalign" => Expr::Literal(Literal::AddressingType("regalign".into())),
+    "fullalign" => Expr::Literal(Literal::AddressingType("fullalign".into())),
+    "hw" => Expr::Literal(Literal::PrecedenceType("hw".into())),
+    "sw" => Expr::Literal(Literal::PrecedenceType("sw".into())),
+};
+PropRefExpr: Expr = {
+    <t:InstanceRef> "->" <p:Ident> => Expr::PropRef { target: t, prop: p },
+    <t:InstanceRef> "->" "reset" => Expr::PropRef { target: t, prop: "reset".into() },
+    <t:InstanceRef> "->" "name" => Expr::PropRef { target: t, prop: "name".into() },
+    <t:InstanceRef> "->" "desc" => Expr::PropRef { target: t, prop: "desc".into() },
 };
 ArrayLit: Expr = {
     "'" "{" <elems:ArrayElems?> "}" => Expr::ArrayLiteral(elems.unwrap_or_default()),
@@ -140,15 +204,66 @@ StructKV: (String, Expr) = {
 };
 
 // ---------------- Root and top-level items ---------------------------------
-pub Root: Root = {
-    <v:RootItems> => Root(v),
-    => Root(vec![]),
+pub Root: Root = { <v:RootSeq> => Root(v), => Root(vec![]) };
+
+RootSeq: Vec<RootItem> = {
+    <h:RootGroup> <t:RootSeq> => { let mut v=h; v.extend(t); v },
+    <g:RootGroup> => g,
 };
-RootItems: Vec<RootItem> = {
-    <h:RootItem> ";" <t:RootItems> => { let mut v=vec![h]; v.extend(t); v },
-    <s:RootItem> ";" => vec![s],
+
+RootGroup: Vec<RootItem> = {
+    // component_named_def component_insts
+    <def:ComponentNamedDef> <p:ParamInstOpt> <list:CompDefInstList> ";" => {
+        let inst = ExplicitComponentInst { inst_type: None, alias: None, comp: ComponentRef::Named(def.name.clone()), param_inst: p, instances: list };
+        vec![RootItem::Component(def), RootItem::ExplicitInst(inst)]
+    },
+    // component_named_def component_inst_type component_insts
+    <def:ComponentNamedDef> "external" <a:InstAliasOpt> <p:ParamInstOpt> <list:CompDefInstList> ";" => {
+        let inst = ExplicitComponentInst { inst_type: Some("external".into()), alias: a, comp: ComponentRef::Named(def.name.clone()), param_inst: p, instances: list };
+        vec![RootItem::Component(def), RootItem::ExplicitInst(inst)]
+    },
+    <def:ComponentNamedDef> "internal" <a:InstAliasOpt> <p:ParamInstOpt> <list:CompDefInstList> ";" => {
+        let inst = ExplicitComponentInst { inst_type: Some("internal".into()), alias: a, comp: ComponentRef::Named(def.name.clone()), param_inst: p, instances: list };
+        vec![RootItem::Component(def), RootItem::ExplicitInst(inst)]
+    },
+    // Anonymous component def followed by insts: component_anon_def component_insts
+    <t:ComponentTypePrimary> <_b:ComponentBody> <p:ParamInstOpt> <list:CompDefInstList> ";" => {
+        let inst = ExplicitComponentInst { inst_type: None, alias: None, comp: ComponentRef::Anonymous(t.clone()), param_inst: p, instances: list };
+        vec![RootItem::ExplicitInst(inst)]
+    },
+    // external/internal prefix before anonymous component def
+    "external" <t:ComponentTypePrimary> <_b:ComponentBody> <p:ParamInstOpt> <list:CompDefInstList> ";" => {
+        let inst = ExplicitComponentInst { inst_type: Some("external".into()), alias: None, comp: ComponentRef::Anonymous(t.clone()), param_inst: p, instances: list };
+        vec![RootItem::ExplicitInst(inst)]
+    },
+    "internal" <t:ComponentTypePrimary> <_b:ComponentBody> <p:ParamInstOpt> <list:CompDefInstList> ";" => {
+        let inst = ExplicitComponentInst { inst_type: Some("internal".into()), alias: None, comp: ComponentRef::Anonymous(t.clone()), param_inst: p, instances: list };
+        vec![RootItem::ExplicitInst(inst)]
+    },
+    // component_anon_def component_inst_type component_insts
+    <t:ComponentTypePrimary> <_b:ComponentBody> "external" <p:ParamInstOpt> <list:CompDefInstList> ";" => {
+        let inst = ExplicitComponentInst { inst_type: Some("external".into()), alias: None, comp: ComponentRef::Anonymous(t.clone()), param_inst: p, instances: list };
+        vec![RootItem::ExplicitInst(inst)]
+    },
+    <t:ComponentTypePrimary> <_b:ComponentBody> "internal" <p:ParamInstOpt> <list:CompDefInstList> ";" => {
+        let inst = ExplicitComponentInst { inst_type: Some("internal".into()), alias: None, comp: ComponentRef::Anonymous(t.clone()), param_inst: p, instances: list };
+        vec![RootItem::ExplicitInst(inst)]
+    },
+    // component_inst_type component_named_def component_insts
+    "external" <def:ComponentNamedDef> <p:ParamInstOpt> <list:CompDefInstList> ";" => {
+        let inst = ExplicitComponentInst { inst_type: Some("external".into()), alias: None, comp: ComponentRef::Named(def.name.clone()), param_inst: p, instances: list };
+        vec![RootItem::Component(def), RootItem::ExplicitInst(inst)]
+    },
+    "internal" <def:ComponentNamedDef> <p:ParamInstOpt> <list:CompDefInstList> ";" => {
+        let inst = ExplicitComponentInst { inst_type: Some("internal".into()), alias: None, comp: ComponentRef::Named(def.name.clone()), param_inst: p, instances: list };
+        vec![RootItem::Component(def), RootItem::ExplicitInst(inst)]
+    },
+    // Single standalone root item followed by semicolon
+    <item:StandardRootItem> ";" => vec![item],
 };
-RootItem: RootItem = {
+
+StandardRootItem: RootItem = {
+    UntypedExplicitInst => RootItem::ExplicitInst(<>),
     ComponentNamedDef => RootItem::Component(<>),
     EnumDef => RootItem::Enum(<>),
     StructDef => RootItem::Struct(<>),
@@ -156,8 +271,10 @@ RootItem: RootItem = {
     LocalPropAssign => RootItem::LocalPropAssign(<>),
     UDPDef => RootItem::Udp(<>),
     ExplicitComponentInst => RootItem::ExplicitInst(<>),
-    TopLevelSimpleInst => RootItem::ExplicitInst(<>),
 };
+
+// Removed intermediate helpers after refactor
+// We'll adjust in RootGroup by replacing base when base == "__DEF__".
 
 // ---------------------------------------------------------------------------
 // Explicit component instantiation (subset of full grammar, iterative build)
@@ -169,27 +286,73 @@ RootItem: RootItem = {
 //                       [ = expr ] [ @ expr ] [ += expr ] [ %= expr ]
 // We capture structural presence as booleans in SingleInst.
 
-// Explicit component instantiation: require inst_type (external/internal) to avoid ambiguity
+// Explicit component instantiation: external/internal forms
 pub ExplicitComponentInst: ExplicitComponentInst = {
     "external" <a:InstAliasOpt> <base:Ident> <p:ParamInstOpt> <l:ExplicitInstList> => {
-        ExplicitComponentInst { inst_type: Some("external".into()), alias: a, base, param_inst: p, instances: l }
+        ExplicitComponentInst { inst_type: Some("external".into()), alias: a, comp: ComponentRef::Named(base), param_inst: p, instances: l }
     },
     "internal" <a:InstAliasOpt> <base:Ident> <p:ParamInstOpt> <l:ExplicitInstList> => {
-        ExplicitComponentInst { inst_type: Some("internal".into()), alias: a, base, param_inst: p, instances: l }
-    }
+        ExplicitComponentInst { inst_type: Some("internal".into()), alias: a, comp: ComponentRef::Named(base), param_inst: p, instances: l }
+    },
 };
 InstAliasOpt: Option<String> = { "alias" <id:Ident> => Some(id), => None };
-ParamInstOpt: bool = { <_p:ParamInst> => true, => false };
+ParamInstOpt: Vec<ParamAssign> = { <v:ParamInst> => v, => vec![] };
 ExplicitInstList: Vec<SingleInst> = {
     <h:ExplicitInstOne> "," <t:ExplicitInstList> => { let mut v=vec![h]; v.extend(t); v },
     <one:ExplicitInstOne> => vec![one],
 };
+CompDefInstList: Vec<SingleInst> = ExplicitInstList;
 ExplicitInstOne: SingleInst = {
-    <n:Ident> <ar:InstArrayOrRange?> <ad:ExplicitAddr?> => { let (has_range, arrays)= ar.unwrap_or((false,0)); SingleInst { name:n, has_range, array_dims:arrays, has_init:false, has_addr:ad.unwrap_or(false), has_incr:false, has_mod:false } },
+    <n:Ident> <ar:InstArrayOrRange?> <mods:InstModSeq> => {
+        let (range_opt, arrays)= ar.unwrap_or((None,vec![]));
+        let (init, addr, stride, align) = mods;
+        SingleInst { name:n, range:range_opt, array_dims:arrays, init_expr:init, addr_expr:addr, stride_expr:stride, align_expr:align }
+    },
 };
-ExplicitAddr: bool = { "@" Expr => true };
-InstArrayOrRange: (bool,u32) = { <_r:RangeSuffix> => (true,0), <n:ArraySuffixes1Plus> => (false,n) };
-ArraySuffixes1Plus: u32 = { <_a:ArraySuffix> <rest:ArraySuffixes1Plus> => 1+rest, <_a:ArraySuffix> => 1 };
+// Untyped explicit instantiation (no external/internal)
+UntypedExplicitInst: ExplicitComponentInst = {
+    <base:Ident> <p:ParamInstOpt> <l:ExplicitInstList> => {
+        ExplicitComponentInst { inst_type: None, alias: None, comp: ComponentRef::Named(base), param_inst: p, instances: l }
+    },
+    "alias" <a:Ident> <base:Ident> <p:ParamInstOpt> <l:ExplicitInstList> => {
+        ExplicitComponentInst { inst_type: None, alias: Some(a), comp: ComponentRef::Named(base), param_inst: p, instances: l }
+    },
+};
+// Ordered instantiation modifiers parsed via recursive descent style to avoid
+// ambiguity for optional sequences. Order: = @ += %= (each at most once)
+ConstExpr: Expr = { <e:Expr> => e };
+InstModSeq: (Option<Expr>,Option<Expr>,Option<Expr>,Option<Expr>) = {
+    // empty
+    => (None,None,None,None),
+    // starts with init
+    "=" <i:Expr> <rest:AfterInit> => { let (a,s,al)=rest; (Some(i), a,s,al) },
+    // starts with address (no init)
+    "@" <a:Expr> <rest:AfterAddr> => { let (s,al)=rest; (None, Some(a), s, al) },
+    // starts with stride (no init/address)
+    "+=" <s:Expr> <rest:AfterStride> => { let al=rest; (None,None,Some(s), al) },
+    // starts with align only
+    "%=" <al:Expr> => (None,None,None,Some(al)),
+};
+AfterInit: (Option<Expr>,Option<Expr>,Option<Expr>) = {
+    "@" <a:Expr> <rest:AfterAddr> => { let (s,al)=rest; (Some(a), s, al) },
+    "+=" <s:Expr> <rest:AfterStride> => (None, Some(s), rest),
+    "%=" <al:Expr> => (None,None,Some(al)),
+    => (None,None,None),
+};
+AfterAddr: (Option<Expr>,Option<Expr>) = {
+    "+=" <s:Expr> <rest:AfterStride> => (Some(s), rest),
+    "%=" <al:Expr> => (None, Some(al)),
+    => (None,None),
+};
+AfterStride: Option<Expr> = {
+    "%=" <al:Expr> => Some(al),
+    => None,
+};
+InstArrayOrRange: (Option<(Expr,Expr)>, Vec<Expr>) = {
+    <r:RangeSuffix> => (Some(r), vec![]),
+    <v:ArraySuffixes1Plus> => (None, v),
+};
+ArraySuffixes1Plus: Vec<Expr> = { <a:ArraySuffix> <rest:ArraySuffixes1Plus> => { let mut v=vec![a]; v.extend(rest); v }, <a:ArraySuffix> => vec![a] };
 
 // (List / array / range handling to be added in later iterations.)
 
@@ -202,6 +365,7 @@ ComponentTypePrimary: ComponentTypePrimary = {
     "reg" => ComponentTypePrimary::Reg,
     "field" => ComponentTypePrimary::Field,
     "mem" => ComponentTypePrimary::Mem,
+    "signal" => ComponentTypePrimary::Signal,
 };
 
 ComponentBody: () = {
@@ -233,12 +397,8 @@ InstSuffix: () = {
     RangeSuffix => (),
     ArraySuffix => (),
 };
-RangeSuffix: () = {
-    "[" Expr ":" Expr "]" => (),
-};
-ArraySuffix: () = {
-    "[" Expr "]" => (),
-};
+RangeSuffix: (Expr,Expr) = { "[" <a:Expr> ":" <b:Expr> "]" => (a,b) };
+ArraySuffix: Expr = { "[" <e:Expr> "]" => e };
 SimpleInstPost: () = {
     RangeSuffix SimpleInstPost => (),
     ArraySuffix SimpleInstPost => (),
@@ -251,9 +411,18 @@ InstAddr: () = { ("@" Expr)? => () }; // retained for AnonComponentWithInst
 LocalPropAssign: LocalPropAssign = {
     "default" <p:Ident> "=" <e:Expr> => LocalPropAssign { is_default: true, prop: p, value: Some(e) },
     <p:Ident> "=" <e:Expr> => LocalPropAssign { is_default: false, prop: p, value: Some(e) },
+    // Allow property names that are special literal keywords
+    "sw" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "sw".into(), value: Some(e) },
+    "hw" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "hw".into(), value: Some(e) },
+    "name" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "name".into(), value: Some(e) },
+    "desc" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "desc".into(), value: Some(e) },
+    "reset" "=" <e:Expr> => LocalPropAssign { is_default: false, prop: "reset".into(), value: Some(e) },
 };
 DynPropAssign: DynPropAssign = {
     <t:InstanceRef> "->" <p:Ident> "=" <e:Expr> => DynPropAssign { target: t, prop: p, value: Some(e) },
+    <t:InstanceRef> "->" "reset" "=" <e:Expr> => DynPropAssign { target: t, prop: "reset".into(), value: Some(e) },
+    <t:InstanceRef> "->" "name" "=" <e:Expr> => DynPropAssign { target: t, prop: "name".into(), value: Some(e) },
+    <t:InstanceRef> "->" "desc" "=" <e:Expr> => DynPropAssign { target: t, prop: "desc".into(), value: Some(e) },
 };
 InstanceRef: Vec<InstanceRefElem> = {
     <h:InstanceRefElem> <ts:InstanceRefTail*> => { let mut v=vec![h]; v.extend(ts); v },
@@ -262,12 +431,13 @@ InstanceRefTail: InstanceRefElem = {
     "." <e:InstanceRefElem> => e,
 };
 InstanceRefElem: InstanceRefElem = {
-    <id:Ident> => InstanceRefElem { ident: id, array_suffixes: vec![] },
+    <id:Ident> <s:InstRefArraySuffix*> => InstanceRefElem { ident: id, array_suffixes: s },
+};
+InstRefArraySuffix: Option<Expr> = {
+    "[" <e:Expr> "]" => Some(e),
 };
 
-pub ComponentNamedDef: ComponentDef = {
-    <t:ComponentTypePrimary> <n:Ident> <params:ParamDefOpt> <_b:ComponentBody> => ComponentDef { ctype: t, name: n, params },
-};
+pub ComponentNamedDef: ComponentDef = { <t:ComponentTypePrimary> <n:Ident> <params:ParamDefOpt> <_b:ComponentBody> => ComponentDef { ctype: t, name: n, params }, };
 
 // ---------------- Struct definitions (subset) -----------------------------
 pub StructDef: StructDef = {
@@ -283,8 +453,9 @@ StructElems: Vec<StructElem> = {
     <h:StructElem> <t:StructElems> => { let mut v=vec![h]; v.extend(t); v },
     <e:StructElem> => vec![e],
 };
+TypeIdent: String = { <s:Ident> => s, "number" => "number".into(), "ref" => "ref".into(), "bit" => "bit".into(), "longint" => "longint".into(), "boolean" => "boolean".into(), "string" => "string".into() };
 StructElem: StructElem = {
-    <ty:Ident> <name:Ident> <arr:StructElemArray?> ";" => StructElem { ty, name, is_array: arr.is_some() },
+    <ty:TypeIdent> <name:Ident> <arr:StructElemArray?> ";" => StructElem { ty, name, is_array: arr.is_some() },
 };
 StructElemArray: () = { "[" "]" => () };
 
@@ -297,9 +468,10 @@ UDPAttrList: Vec<UDPAttr> = {
     <a:UDPAttr> ";" => vec![a],
 };
 UDPAttr: UDPAttr = {
-    "type" "=" <dt:Ident> <arr:UDPArray?> => UDPAttr::Type { data_type: dt, is_array: arr.is_some() },
-    "default" "=" <e:Expr> => UDPAttr::Default(e),
+    "type" "=" <dt:PropertyDataType> <arr:UDPArray?> => UDPAttr::Type { data_type: dt, is_array: arr.is_some() },
+    "default" "=" <e:ConstExpr> => UDPAttr::Default(e),
     "component" "=" <ts:PropertyCompTypes> => UDPAttr::Usage(ts),
+    "constraint" "=" "componentwidth" => UDPAttr::Constraint("componentwidth".into()),
     "constraint" "=" <c:Ident> => UDPAttr::Constraint(c),
 };
 UDPArray: () = {
@@ -338,9 +510,7 @@ ParamDefElemList: Vec<ParamDecl> = {
 ParamDefElemListTail: Vec<ParamDecl> = {
     "," <n:ParamDefElem> <rest:ParamDefElemListTail?> => { let mut v=vec![n]; if let Some(mut r)=rest { v.append(&mut r);} v },
 };
-ParamDefElem: ParamDecl = {
-    <dt:Ident> <name:Ident> ParamArrayType? <def:ParamDefault?> => ParamDecl { data_type: dt, name, default: def },
-};
+ParamDefElem: ParamDecl = { <dt:DataType> <name:Ident> ParamArrayType? <def:ParamDefault?> => ParamDecl { data_type: dt, name, default: def }, };
 ParamArrayType: () = {
     "[" "]" => (),
 };
@@ -348,17 +518,9 @@ ParamDefault: Expr = {
     "=" <e:Expr> => e,
 };
 
-// No longer need optional wrapper; handled in SimpleInst alternatives
-ParamInst: () = {
-    "#" "(" <ParamAssignments> ")" => (),
-};
-ParamAssignments: () = {
-    <ParamAssignment> "," <ParamAssignments> => (),
-    <ParamAssignment> => (),
-};
-ParamAssignment: () = {
-    "." Ident "(" Expr ")" => (),
-};
+ParamInst: Vec<ParamAssign> = { "#" "(" <v:ParamAssignList?> ")" => v.unwrap_or_default() };
+ParamAssignList: Vec<ParamAssign> = { <h:ParamAssignment> "," <t:ParamAssignList> => { let mut v=vec![h]; v.extend(t); v }, <one:ParamAssignment> => vec![one] };
+ParamAssignment: ParamAssign = { "." <id:Ident> "(" <e:Expr> ")" => ParamAssign { name:id, value:e } };
 
 EnumEntries: Vec<EnumEntry> = {
     <h:EnumEntry> <t:EnumEntries> => { let mut v=vec![h]; v.extend(t); v },
@@ -371,10 +533,48 @@ EnumEntry: EnumEntry = {
 pub EnumDef: EnumDef = {
     "enum" <n:Ident> "{" <ents:EnumEntries> "}" => EnumDef { name: n, entries: ents },
 };
-TopLevelSimpleInst: ExplicitComponentInst = {
-    <base:Ident> <p:ParamInstOpt> <n:Ident> <ar:InstArrayOrRange?> <addr:TopLevelAddr?> => {
-        let (has_range, arrays) = ar.unwrap_or((false,0));
-        ExplicitComponentInst { inst_type: None, alias: None, base, param_inst: p, instances: vec![ SingleInst { name:n, has_range, array_dims:arrays, has_init:false, has_addr: addr.unwrap_or(false), has_incr:false, has_mod:false } ] }
-    }
+// Removed TopLevelSimpleInst after unification
+
+// Data types (subset)
+DataType: DataType = {
+    "bit" "unsigned" => DataType::Bit { unsigned: true },
+    "bit" => DataType::Bit { unsigned: false },
+    "longint" "unsigned" => DataType::LongInt { unsigned: true },
+    "longint" => DataType::LongInt { unsigned: false },
+    "string" => DataType::String,
+    "boolean" => DataType::Boolean,
+    "number" => DataType::Number,
+    "ref" => DataType::Ref,
+    "accesstype" => DataType::AccessType,
+    "addressingtype" => DataType::AddressingType,
+    "onreadtype" => DataType::OnReadType,
+    "onwritetype" => DataType::OnWriteType,
+    <id:Ident> => DataType::User(id),
 };
-TopLevelAddr: bool = { "@" Expr => true };
+
+PropertyDataType: DataType = {
+    "addrmap" => DataType::User("addrmap".into()),
+    "regfile" => DataType::User("regfile".into()),
+    "reg" => DataType::User("reg".into()),
+    "field" => DataType::User("field".into()),
+    "mem" => DataType::User("mem".into()),
+    "ref" => DataType::Ref,
+    "number" => DataType::Number,
+    "bit" "unsigned" => DataType::Bit { unsigned: true },
+    "bit" => DataType::Bit { unsigned: false },
+    "longint" "unsigned" => DataType::LongInt { unsigned: true },
+    "longint" => DataType::LongInt { unsigned: false },
+    "string" => DataType::String,
+    "boolean" => DataType::Boolean,
+    "accesstype" => DataType::AccessType,
+    "addressingtype" => DataType::AddressingType,
+    "onreadtype" => DataType::OnReadType,
+    "onwritetype" => DataType::OnWriteType,
+    <id:Ident> => DataType::User(id),
+};
+ConcatExpr: Expr = { "{" <list:ConcatList?> "}" => Expr::Concat(list.unwrap_or_default()) };
+ConcatList: Vec<Expr> = {
+    <h:Expr> "," <t:ConcatList> => { let mut v=vec![h]; v.extend(t); v },
+    <e:Expr> => vec![e],
+};
+ReplicateExpr: Expr = { "{" <cnt:Expr> <c:ConcatExpr> "}" => match c { Expr::Concat(v) => Expr::Replicate { count: Box::new(cnt), elems: v }, _ => unreachable!() } };

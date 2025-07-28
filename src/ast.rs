@@ -19,6 +19,7 @@ pub enum ComponentTypePrimary {
     Reg,
     Field,
     Mem,
+    Signal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,7 +43,7 @@ pub struct EnumEntry {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParamDecl {
-    pub data_type: String,
+    pub data_type: DataType,
     pub name: String,
     pub default: Option<Expr>,
 }
@@ -83,16 +84,112 @@ pub struct InstanceRefElem {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr {
-    Number(String),
+    Literal(Literal),
     Ident(String),
-    Str(String),
-    Bool(bool),
-    EnumLiteral { scope: String, name: String },
+    EnumLiteral {
+        scope: String,
+        name: String,
+    },
     ArrayLiteral(Vec<Expr>),
-    StructLiteral { name: String, kv: Vec<(String, Expr)> },
-    Unary { op: String, rhs: Box<Expr> },
-    Binary { op: String, lhs: Box<Expr>, rhs: Box<Expr> },
-    Ternary { cond: Box<Expr>, then_br: Box<Expr>, else_br: Box<Expr> },
+    StructLiteral {
+        name: String,
+        kv: Vec<(String, Expr)>,
+    },
+    Unary {
+        op: UnaryOp,
+        rhs: Box<Expr>,
+    },
+    Reduct {
+        op: ReductOp,
+        rhs: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    Ternary {
+        cond: Box<Expr>,
+        then_br: Box<Expr>,
+        else_br: Box<Expr>,
+    },
+    CastType {
+        ty: CastPrimType,
+        expr: Box<Expr>,
+    },
+    CastWidth {
+        width: Box<Expr>,
+        expr: Box<Expr>,
+    },
+    PropRef {
+        target: Vec<InstanceRefElem>,
+        prop: String,
+    },
+    Concat(Vec<Expr>),
+    Replicate {
+        count: Box<Expr>,
+        elems: Vec<Expr>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Literal {
+    Dec(String),
+    Hex(String),
+    Verilog { raw: String }, // keep raw; later can normalize width/base/digits
+    Bool(bool),
+    AccessType(String),
+    OnReadType(String),
+    OnWriteType(String),
+    AddressingType(String),
+    PrecedenceType(String),
+    Special(String), // fallback / generic
+    Str(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UnaryOp {
+    Plus,
+    Minus,
+    Not,
+    BitNot,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReductOp {
+    And,
+    Or,
+    Xor,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BinaryOp {
+    Pow,
+    Mul,
+    Div,
+    Mod,
+    Add,
+    Sub,
+    Shl,
+    Shr,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+    BitAnd,
+    BitXor,
+    BitXnor,
+    BitOr,
+    LogAnd,
+    LogOr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CastPrimType {
+    Boolean,
+    Bit,
+    LongInt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,7 +200,7 @@ pub struct UDPDef {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UDPAttr {
-    Type { data_type: String, is_array: bool },
+    Type { data_type: DataType, is_array: bool },
     Default(Expr),
     Usage(Vec<String>),
     Constraint(String),
@@ -113,18 +210,46 @@ pub enum UDPAttr {
 pub struct ExplicitComponentInst {
     pub inst_type: Option<String>, // external|internal
     pub alias: Option<String>,
-    pub base: String,              // component type name
-    pub param_inst: bool,          // whether a parameter instantiation was present
+    pub comp: ComponentRef,
+    pub param_inst: Vec<ParamAssign>, // parameter assignments
     pub instances: Vec<SingleInst>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SingleInst {
     pub name: String,
-    pub has_range: bool,   // true if a [a:b] range present
-    pub array_dims: u32,   // number of [] array suffixes
-    pub has_init: bool,    // '=' constant_expression present
-    pub has_addr: bool,    // '@' constant_expression present
-    pub has_incr: bool,    // '+=' constant_expression present
-    pub has_mod: bool,     // '%=' constant_expression present
+    pub range: Option<(Expr, Expr)>, // range suffix if present
+    pub array_dims: Vec<Expr>,       // list of array dimension expressions
+    pub init_expr: Option<Expr>,
+    pub addr_expr: Option<Expr>,
+    pub stride_expr: Option<Expr>,
+    pub align_expr: Option<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ComponentRef {
+    Named(String),
+    Anonymous(ComponentTypePrimary),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParamAssign {
+    pub name: String,
+    pub value: Expr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DataType {
+    Bit { unsigned: bool },
+    LongInt { unsigned: bool },
+    String,
+    Boolean,
+    Number,
+    Ref,
+    User(String),
+    AccessType,
+    AddressingType,
+    OnReadType,
+    OnWriteType,
+    Other(String),
 }
