@@ -13,3 +13,7 @@ lalrpop = "0.22.2"
 
 [dependencies]
 lalrpop-util = { version = "0.22.2", features = ["lexer", "unicode"] }
+
+# Make lalrpop run faster.
+[profile.dev.build-override]
+opt-level = 3

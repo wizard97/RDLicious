@@ -32,6 +32,7 @@ fn multiple_components_and_enum() {
             ast::RootItem::DynPropAssign(d) => println!("DynProp {}", d.prop),
             ast::RootItem::LocalPropAssign(p) => println!("LocalProp {}", p.prop),
             ast::RootItem::Udp(u) => println!("UDP {} ({} attrs)", u.name, u.attrs.len()),
+            ast::RootItem::Constraint(_) => println!("Constraint (not integrated)"),
             ast::RootItem::ExplicitInst(e) => {
                 let name = match &e.comp {
                     ast::ComponentRef::Named(n) => n.as_str(),
@@ -979,3 +980,5 @@ fn cast_width_basic() {
         _ => panic!("expected width cast"),
     }
 }
+
+// (Constraint parsing not yet integrated into root in this iteration)

@@ -5,7 +5,7 @@ use crate::ast::*;
 // Lexer: a pragmatic subset of SystemRDL tokens needed for the implemented grammar.
 match {
     // Keywords and multi-char ops first so they are not lexed as generic ID
-    "addrmap","regfile","reg","field","mem","signal","enum","struct","abstract","default","external","internal","true","false","property","type","component","constraint","all","alias","bit","longint","boolean","number",
+    "addrmap","regfile","reg","field","mem","signal","enum","struct","abstract","default","external","internal","true","false","property","type","component","constraint","all","alias","bit","longint","boolean","number","inside","this",
     // Literal keywords (lowercase subset)
     "na","rw","wr","r","w","rw1","w1",
     "rclr","rset","ruser",
@@ -637,3 +637,5 @@ ConstCastWidthExpr: Expr = { Number, "(" <e:ConstExpr> ")" => e };
 ConstConcatExpr: Expr = { "{" <l:ConstConcatList?> "}" => Expr::Concat(l.unwrap_or_default()) };
 ConstConcatList: Vec<Expr> = { <h:ConstExpr> "," <t:ConstConcatList> => { let mut v=vec![h]; v.extend(t); v }, <e:ConstExpr> => vec![e] };
 ConstReplicateExpr: Expr = { "{" <cnt:ConstExpr> <c:ConstConcatExpr> "}" => match c { Expr::Concat(v) => Expr::Replicate { count: Box::new(cnt), elems: v }, _ => unreachable!() } };
+
+// (Constraint grammar omitted in this iteration due to parser generation performance)

@@ -7,6 +7,7 @@ pub enum RootItem {
     LocalPropAssign(LocalPropAssign),
     Udp(UDPDef),
     ExplicitInst(ExplicitComponentInst),
+    Constraint(ConstraintDef),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -252,6 +253,34 @@ pub enum DataType {
     OnReadType,
     OnWriteType,
     Other(String),
+}
+
+// ---------------- Constraints (subset) ----------------
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConstraintDef {
+    pub name: Option<String>,
+    pub elems: Vec<ConstraintElem>,
+    pub insts: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConstraintElem {
+    Rel { lhs: Expr, op: BinaryOp, rhs: Expr },
+    PropAssign { id: String, value: Expr },
+    InsideValues { lhs: ConstraintLhs, values: Vec<ConstraintInsideValue> },
+    InsideEnum { lhs: ConstraintLhs, enum_id: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConstraintLhs {
+    This,
+    InstanceRef(Vec<InstanceRefElem>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConstraintInsideValue {
+    Single(Expr),
+    Range(Expr, Expr),
 }
 
 // Helper to detect disallowed property references in constant contexts
