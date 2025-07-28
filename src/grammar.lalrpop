@@ -4,18 +4,19 @@ use crate::ast::*;
 
 // Lexer: a pragmatic subset of SystemRDL tokens needed for the implemented grammar.
 match {
-    r"[0-9]+" => INT,
-    r"0x[0-9a-fA-F]+" => HEX_LOW,
-    r"0X[0-9a-fA-F]+" => HEX_UPPER,
-    r"[a-zA-Z_][a-zA-Z0-9_]*" => ID,
+    // Keywords and multi-char ops first so they are not lexed as generic ID
     "addrmap","regfile","reg","field","mem","enum","struct","abstract","default","external","internal","true","false","property","type","component","constraint","all","signal","alias",
     "**","<<",">>","==","!=","<=",">=","&&","||","~&","~|",
     "=","+=","%=","[","]","@","->","::","{","}",";",",",".","'","#",
     "(",")","?",":","+","-","*","/","%","&","|","^","~^","^~","!","~","<",">",
+    r"[0-9]+" => INT,
+    r"0x[0-9a-fA-F]+" => HEX_LOW,
+    r"0X[0-9a-fA-F]+" => HEX_UPPER,
+    r#"\"([^"\\]|\\.)*\""# => STRING,
+    r"[a-zA-Z_][a-zA-Z0-9_]*" => ID,
     r"[ \t\r\n]+" => { },
     r"//[^\n\r]*" => { },
     r"/\*([^*]*\*+[^*/])*([^*]*\*+|[^*])*\*/" => { },
-    r#"\"([^"\\]|\\.)*\""# => STRING,
     _
 }
 
@@ -31,12 +32,11 @@ String: String = {
     <s:STRING> => s.to_string(),
 };
 
-// Expression grammar using precedence / associativity attributes.
-// Lower numeric level = higher precedence (level 0 binds tightest).
+// Single-rule precedence-based expression grammar using attributes
 pub Expr: Expr = {
-    // Primary atoms
+    // Highest precedence: primary
     #[precedence(level="0")] Primary,
-    // Unary prefix operators (right-associative to chain like ~!-a)
+    // Unary prefix (right associative chaining)
     #[precedence(level="0")]
     "+" <e:Expr> => Expr::Unary { op: "+".into(), rhs: Box::new(e) },
     #[precedence(level="0")]
@@ -82,7 +82,7 @@ pub Expr: Expr = {
     // Bitwise AND
     #[precedence(level="7")] #[assoc(side="left")]
     <l:Expr> "&" <r:Expr> => Expr::Binary { op: "&".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    // Bitwise XOR (three spellings)
+    // Bitwise XOR variants
     #[precedence(level="8")] #[assoc(side="left")]
     <l:Expr> "^" <r:Expr> => Expr::Binary { op: "^".into(), lhs: Box::new(l), rhs: Box::new(r) },
     #[precedence(level="8")] #[assoc(side="left")]
@@ -98,7 +98,7 @@ pub Expr: Expr = {
     // Logical OR
     #[precedence(level="11")] #[assoc(side="left")]
     <l:Expr> "||" <r:Expr> => Expr::Binary { op: "||".into(), lhs: Box::new(l), rhs: Box::new(r) },
-    // Ternary conditional (right associative, lowest precedence)
+    // Ternary conditional (lowest precedence, right associative)
     #[precedence(level="12")] #[assoc(side="right")]
     <c:Expr> "?" <t:Expr> ":" <e:Expr> => Expr::Ternary { cond: Box::new(c), then_br: Box::new(t), else_br: Box::new(e) },
 };
@@ -155,12 +155,46 @@ RootItem: RootItem = {
     DynPropAssign => RootItem::DynPropAssign(<>),
     LocalPropAssign => RootItem::LocalPropAssign(<>),
     UDPDef => RootItem::Udp(<>),
-    TopLevelInst => <>,
+    ExplicitComponentInst => RootItem::ExplicitInst(<>),
+    TopLevelSimpleInst => RootItem::ExplicitInst(<>),
 };
 
-TopLevelInst: RootItem = {
-    SimpleInst => RootItem::LocalPropAssign(LocalPropAssign { is_default:false, prop:"_inst".into(), value: None }),
+// ---------------------------------------------------------------------------
+// Explicit component instantiation (subset of full grammar, iterative build)
+// Grammar reference (simplified):
+//   explicit_component_inst ::= [ component_inst_type ] [ component_inst_alias ]
+//                               ID component_insts
+//   component_insts ::= [ param_inst ] component_inst { , component_inst }
+//   component_inst ::= ID [ ( array+ | range ) ]
+//                       [ = expr ] [ @ expr ] [ += expr ] [ %= expr ]
+// We capture structural presence as booleans in SingleInst.
+
+// Explicit component instantiation: require inst_type (external/internal) to avoid ambiguity
+pub ExplicitComponentInst: ExplicitComponentInst = {
+    "external" <a:InstAliasOpt> <base:Ident> <p:ParamInstOpt> <l:ExplicitInstList> => {
+        ExplicitComponentInst { inst_type: Some("external".into()), alias: a, base, param_inst: p, instances: l }
+    },
+    "internal" <a:InstAliasOpt> <base:Ident> <p:ParamInstOpt> <l:ExplicitInstList> => {
+        ExplicitComponentInst { inst_type: Some("internal".into()), alias: a, base, param_inst: p, instances: l }
+    }
 };
+InstAliasOpt: Option<String> = { "alias" <id:Ident> => Some(id), => None };
+ParamInstOpt: bool = { <_p:ParamInst> => true, => false };
+ExplicitInstList: Vec<SingleInst> = {
+    <h:ExplicitInstOne> "," <t:ExplicitInstList> => { let mut v=vec![h]; v.extend(t); v },
+    <one:ExplicitInstOne> => vec![one],
+};
+ExplicitInstOne: SingleInst = {
+    <n:Ident> <ar:InstArrayOrRange?> <ad:ExplicitAddr?> => { let (has_range, arrays)= ar.unwrap_or((false,0)); SingleInst { name:n, has_range, array_dims:arrays, has_init:false, has_addr:ad.unwrap_or(false), has_incr:false, has_mod:false } },
+};
+ExplicitAddr: bool = { "@" Expr => true };
+InstArrayOrRange: (bool,u32) = { <_r:RangeSuffix> => (true,0), <n:ArraySuffixes1Plus> => (false,n) };
+ArraySuffixes1Plus: u32 = { <_a:ArraySuffix> <rest:ArraySuffixes1Plus> => 1+rest, <_a:ArraySuffix> => 1 };
+
+// (List / array / range handling to be added in later iterations.)
+
+// Allow explicit component inst inside component bodies (discard AST):
+ExplicitCompInstBody: () = { <_e:ExplicitComponentInst> => () };
 
 ComponentTypePrimary: ComponentTypePrimary = {
     "addrmap" => ComponentTypePrimary::Addrmap,
@@ -180,25 +214,23 @@ ComponentBodyItem: () = {
     LocalPropAssign => (),
     DynPropAssign => (),
     ParamInst => (),
+    ExplicitCompInstBody => (),
 };
 AnonComponentWithInst: () = {
     ComponentTypePrimary ComponentBody Ident InstSuffixes? InstAddr => (),
 };
-// Allow optional parameter instantiation between type name and instance identifier
-// Need lookahead between type and instance name; treat pattern with '#' as separate rule
+// Simple component instantiation inside component bodies (subset)
 SimpleInst: () = {
-    ExtKw? Ident Ident InstSuffixes? InstAddr => (),
-    ExtKw? Ident ParamInst Ident InstSuffixes? InstAddr => (),
+    Ident Ident SimpleInstPost => (),
+    Ident ParamInst Ident SimpleInstPost => (),
 };
-ExtKw: () = {
-    "external" => (),
+// external/internal handled only by ExplicitComponentInst to avoid ambiguity
+InstSuffixes: () = {
+    InstSuffix InstSuffixes => (),
+    InstSuffix => (),
 };
-
-InstSuffixes: () = { RangeSuffixes => () };
-RangeSuffixes: () = {
-    RangeSuffix RangeSuffixes => (),
+InstSuffix: () = {
     RangeSuffix => (),
-    ArraySuffix RangeSuffixes => (),
     ArraySuffix => (),
 };
 RangeSuffix: () = {
@@ -207,9 +239,13 @@ RangeSuffix: () = {
 ArraySuffix: () = {
     "[" Expr "]" => (),
 };
-InstAddr: () = {
-    ("@" Expr)? ("+=" Expr)? ("%=" Expr)? => (),
+SimpleInstPost: () = {
+    RangeSuffix SimpleInstPost => (),
+    ArraySuffix SimpleInstPost => (),
+    "@" Expr => (),
+    => (),
 };
+InstAddr: () = { ("@" Expr)? => () }; // retained for AnonComponentWithInst
 // removed simple PropertyAssign to avoid ambiguity; LocalPropAssign handles '=' case
 
 LocalPropAssign: LocalPropAssign = {
@@ -226,19 +262,7 @@ InstanceRefTail: InstanceRefElem = {
     "." <e:InstanceRefElem> => e,
 };
 InstanceRefElem: InstanceRefElem = {
-    <id:Ident> <s:ArraySuffixesIROpt> => InstanceRefElem { ident: id, array_suffixes: s },
-};
-ArraySuffixesIROpt: Vec<Option<Expr>> = {
-    <v:ArraySuffixesIR> => v,
-    => vec![],
-};
-ArraySuffixesIR: Vec<Option<Expr>> = {
-    <h:ArraySuffixIR> <t:ArraySuffixesIR> => { let mut v=vec![h]; v.extend(t); v },
-    <o:ArraySuffixIR> => vec![o],
-};
-ArraySuffixIR: Option<Expr> = {
-    "[" <e:Expr> "]" => Some(e),
-    "[" "]" => None,
+    <id:Ident> => InstanceRefElem { ident: id, array_suffixes: vec![] },
 };
 
 pub ComponentNamedDef: ComponentDef = {
@@ -306,8 +330,13 @@ ParamDef: Vec<ParamDecl> = {
     "#" "(" <es:ParamDefElems> ")" => es,
 };
 ParamDefElems: Vec<ParamDecl> = {
-    <h:ParamDefElem> "," <t:ParamDefElems> => { let mut v=vec![h]; v.extend(t); v },
-    <e:ParamDefElem> => vec![e],
+    <v:ParamDefElemList> => v,
+};
+ParamDefElemList: Vec<ParamDecl> = {
+    <h:ParamDefElem> <t:ParamDefElemListTail?> => { let mut v=vec![h]; if let Some(mut r)=t { v.append(&mut r);} v },
+};
+ParamDefElemListTail: Vec<ParamDecl> = {
+    "," <n:ParamDefElem> <rest:ParamDefElemListTail?> => { let mut v=vec![n]; if let Some(mut r)=rest { v.append(&mut r);} v },
 };
 ParamDefElem: ParamDecl = {
     <dt:Ident> <name:Ident> ParamArrayType? <def:ParamDefault?> => ParamDecl { data_type: dt, name, default: def },
@@ -342,3 +371,10 @@ EnumEntry: EnumEntry = {
 pub EnumDef: EnumDef = {
     "enum" <n:Ident> "{" <ents:EnumEntries> "}" => EnumDef { name: n, entries: ents },
 };
+TopLevelSimpleInst: ExplicitComponentInst = {
+    <base:Ident> <p:ParamInstOpt> <n:Ident> <ar:InstArrayOrRange?> <addr:TopLevelAddr?> => {
+        let (has_range, arrays) = ar.unwrap_or((false,0));
+        ExplicitComponentInst { inst_type: None, alias: None, base, param_inst: p, instances: vec![ SingleInst { name:n, has_range, array_dims:arrays, has_init:false, has_addr: addr.unwrap_or(false), has_incr:false, has_mod:false } ] }
+    }
+};
+TopLevelAddr: bool = { "@" Expr => true };

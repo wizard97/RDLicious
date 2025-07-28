@@ -6,6 +6,7 @@ pub enum RootItem {
     DynPropAssign(DynPropAssign),
     LocalPropAssign(LocalPropAssign),
     Udp(UDPDef),
+    ExplicitInst(ExplicitComponentInst),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,4 +107,24 @@ pub enum UDPAttr {
     Default(Expr),
     Usage(Vec<String>),
     Constraint(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExplicitComponentInst {
+    pub inst_type: Option<String>, // external|internal
+    pub alias: Option<String>,
+    pub base: String,              // component type name
+    pub param_inst: bool,          // whether a parameter instantiation was present
+    pub instances: Vec<SingleInst>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SingleInst {
+    pub name: String,
+    pub has_range: bool,   // true if a [a:b] range present
+    pub array_dims: u32,   // number of [] array suffixes
+    pub has_init: bool,    // '=' constant_expression present
+    pub has_addr: bool,    // '@' constant_expression present
+    pub has_incr: bool,    // '+=' constant_expression present
+    pub has_mod: bool,     // '%=' constant_expression present
 }

@@ -12,5 +12,4 @@ crate-type = ["cdylib"]
 lalrpop = "0.22.2"
 
 [dependencies]
-pyo3 = { version = "0.25.0", features = ["extension-module", "abi3-py312"] }
-lalrpop-util = { version = "0.21.0", features = ["lexer", "unicode"] }
+lalrpop-util = { version = "0.22.2", features = ["lexer", "unicode"] }
